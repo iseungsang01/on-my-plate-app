@@ -228,7 +228,8 @@ Codex가 이 문서를 기준으로 작업할 때는 아래 규칙을 따른다.
 
 ### 처리 기록
 
-- 미처리
+- 2026-05-07: 선택 B로 정리. `PlannerWidgetStore.savePendingRoute()`와 `KEY_PENDING_ROUTE`를 제거하고, 위젯 루트 클릭 액션은 pending route 저장 없이 `MainActivity`를 열어 기본 `Planner` 화면으로 이동하도록 단순화.
+- 2026-05-07: `.\gradlew.bat :app:assembleDebug` 검증 실패. 원인: 저장소에 Gradle Wrapper(`gradlew.bat`)가 없고 현재 환경의 `PATH`에도 `gradle` 명령이 없어 빌드를 실행할 수 없음. 남은 작업: Gradle Wrapper 추가 또는 Gradle 사용 가능 환경에서 `:app:assembleDebug` 재실행.
 
 ---
 

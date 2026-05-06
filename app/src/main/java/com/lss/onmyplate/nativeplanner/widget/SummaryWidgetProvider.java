@@ -33,7 +33,7 @@ import java.util.Locale;
 import java.util.Map;
 
 public class SummaryWidgetProvider extends AppWidgetProvider {
-    private static final String ACTION_OPEN_SUMMARY = "com.lss.onmyplate.nativeplanner.action.OPEN_SUMMARY";
+    private static final String ACTION_OPEN_PLANNER = "com.lss.onmyplate.nativeplanner.action.OPEN_PLANNER";
     private static final String ACTION_PREVIOUS_WEEK = "com.lss.onmyplate.nativeplanner.action.WIDGET_PREVIOUS_WEEK";
     private static final String ACTION_NEXT_WEEK = "com.lss.onmyplate.nativeplanner.action.WIDGET_NEXT_WEEK";
     private static final String ACTION_TOGGLE_VIEWPORT = "com.lss.onmyplate.nativeplanner.action.WIDGET_TOGGLE_VIEWPORT";
@@ -78,8 +78,7 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
         String action = intent.getAction();
         int appWidgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID);
 
-        if (ACTION_OPEN_SUMMARY.equals(action)) {
-            PlannerWidgetStore.savePendingRoute(context, "/summary");
+        if (ACTION_OPEN_PLANNER.equals(action)) {
             Intent launchIntent = new Intent(context, MainActivity.class);
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             context.startActivity(launchIntent);
@@ -122,7 +121,7 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
         views.setTextViewText(R.id.widget_week, formatWeekLabel(snapshot.getWeekStartForOffset(state.weekOffset)));
         views.setImageViewBitmap(R.id.widget_timetable, renderTimetableBitmap(context, manager, appWidgetId, state, days));
 
-        bindAction(context, views, appWidgetId, R.id.summary_widget_root, ACTION_OPEN_SUMMARY);
+        bindAction(context, views, appWidgetId, R.id.summary_widget_root, ACTION_OPEN_PLANNER);
         bindAction(context, views, appWidgetId, R.id.widget_week_prev, ACTION_PREVIOUS_WEEK);
         bindAction(context, views, appWidgetId, R.id.widget_week_next, ACTION_NEXT_WEEK);
         bindAction(context, views, appWidgetId, R.id.widget_viewport_toggle, ACTION_TOGGLE_VIEWPORT);
