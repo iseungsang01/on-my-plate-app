@@ -31,6 +31,17 @@ fun envOrDotenv(name: String): String? {
 fun requiredEnvOrDotenv(name: String): String =
     envOrDotenv(name) ?: error("Missing $name. Add it to .env or the process environment.")
 
+fun missingEnvOrDotenv(names: List<String>): List<String> =
+    names.filter { envOrDotenv(it).isNullOrBlank() }
+
+val releaseSigningEnvNames = listOf(
+    "ANDROID_KEYSTORE_PATH",
+    "ANDROID_KEYSTORE_PASSWORD",
+    "ANDROID_KEY_ALIAS",
+    "ANDROID_KEY_PASSWORD",
+)
+val playEnvNames = listOf("PLAY_SERVICE_ACCOUNT_JSON_PATH")
+
 android {
     namespace = "com.lss.onmyplate.nativeplanner"
     compileSdk = 35
@@ -70,10 +81,12 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(requiredEnvOrDotenv("ANDROID_KEYSTORE_PATH"))
-            storePassword = requiredEnvOrDotenv("ANDROID_KEYSTORE_PASSWORD")
-            keyAlias = requiredEnvOrDotenv("ANDROID_KEY_ALIAS")
-            keyPassword = requiredEnvOrDotenv("ANDROID_KEY_PASSWORD")
+            if (missingEnvOrDotenv(releaseSigningEnvNames).isEmpty()) {
+                storeFile = file(requiredEnvOrDotenv("ANDROID_KEYSTORE_PATH"))
+                storePassword = requiredEnvOrDotenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = requiredEnvOrDotenv("ANDROID_KEY_ALIAS")
+                keyPassword = requiredEnvOrDotenv("ANDROID_KEY_PASSWORD")
+            }
         }
     }
 
@@ -85,7 +98,9 @@ android {
 }
 
 play {
-    serviceAccountCredentials.set(file(requiredEnvOrDotenv("PLAY_SERVICE_ACCOUNT_JSON_PATH")))
+    envOrDotenv("PLAY_SERVICE_ACCOUNT_JSON_PATH")?.let {
+        serviceAccountCredentials.set(file(it))
+    }
     track.set(envOrDotenv("PLAY_TRACK") ?: "internal")
     releaseStatus.set(ReleaseStatus.valueOf(envOrDotenv("PLAY_RELEASE_STATUS") ?: "DRAFT"))
     defaultToAppBundles.set(true)
@@ -95,6 +110,25 @@ tasks.register("publishAab") {
     group = "publishing"
     description = "Builds the signed release AAB and uploads it to the configured Google Play track."
     dependsOn("publishReleaseBundle")
+}
+
+gradle.taskGraph.whenReady {
+    val taskNames = allTasks.map { it.name }.toSet()
+    val needsReleaseSigning = taskNames.any { it in setOf("assembleRelease", "bundleRelease", "publishReleaseBundle", "publishAab") }
+    if (needsReleaseSigning) {
+        val missing = missingEnvOrDotenv(releaseSigningEnvNames)
+        check(missing.isEmpty()) {
+            "Release signing requires ${missing.joinToString()}. Add them to .env or the process environment."
+        }
+    }
+
+    val needsPlayCredentials = taskNames.any { it in setOf("publishReleaseBundle", "publishAab") }
+    if (needsPlayCredentials) {
+        val missing = missingEnvOrDotenv(playEnvNames)
+        check(missing.isEmpty()) {
+            "Google Play publishing requires ${missing.joinToString()}. Add it to .env or the process environment."
+        }
+    }
 }
 
 kapt {

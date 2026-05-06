@@ -36,7 +36,7 @@ Codex가 이 문서를 기준으로 작업할 때는 아래 규칙을 따른다.
 - [x] P1-1. 한국어 파서 테스트 추가
 - [x] P1-2. 공유 출처 `sourceApp` 저장 누락 수정
 - [ ] P1-3. 위젯 클릭 라우팅 정리
-- [ ] P2-1. release/play 환경변수 요구 시점 완화
+- [x] P2-1. release/play 환경변수 요구 시점 완화
 - [ ] P2-2. Gradle Wrapper 추가
 - [ ] P2-3. 위젯 snapshot 구조 정리
 - [ ] P3-1. 전반 테스트 보강
@@ -271,7 +271,9 @@ Codex가 이 문서를 기준으로 작업할 때는 아래 규칙을 따른다.
 
 ### 처리 기록
 
-- 미처리
+- 2026-05-07: `app/build.gradle.kts`의 release signing/Play credential 필수값 평가를 debug Gradle configuration 경로에서 제거. release signing 값은 모두 있을 때만 signing config에 채우고, `assembleRelease`/`bundleRelease`/`publishReleaseBundle`/`publishAab` task graph에서만 명확한 누락 메시지를 내도록 변경.
+- 2026-05-07: `.env.example`과 `README.md`에 debug 빌드는 release signing/Play env 없이 가능하고, signed release 및 Play publish에서만 해당 env가 필요하다고 분리해 문서화.
+- 2026-05-07: `.env`를 임시로 제거한 빈 release env 상태에서 `:app:assembleDebug` 검증 성공. `:app:assembleRelease`는 `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` 누락 메시지로 실패 확인. signing dummy env만 둔 `:app:publishAab`는 `PLAY_SERVICE_ACCOUNT_JSON_PATH` 누락 메시지로 실패 확인. 기존 범위 경고: Gradle 9.0 호환성 deprecation 경고.
 
 ---
 

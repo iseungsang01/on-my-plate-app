@@ -6,6 +6,8 @@ Native Android Kotlin MVP for shared-text appointment ingestion.
 
 Open this folder in Android Studio, let Gradle sync, then run the `app` configuration on a device or emulator.
 
+Debug builds do not require Android release signing or Google Play publishing variables. For a local debug build, provide only app/runtime values such as `ANDROID_APPLICATION_ID`, version fields, and optional Gemini settings when needed.
+
 The app registers an Android `ACTION_SEND` target for `text/plain`. Share text from KakaoTalk, SMS, memo apps, browsers, or any Android app into `On My Plate Planner`; the share receiver parses the text, creates an appointment candidate, and shows a native notification with inline title input and actions.
 
 ## MVP Scope
@@ -24,4 +26,6 @@ No KakaoTalk scraping, login, background chat monitoring, web app, cloud sync, o
 - If Play reports a newer AAB version and allows an immediate update, the Play update UI opens automatically.
 - If an immediate update was interrupted, the app resumes it from `onResume()`.
 - Before publishing a new AAB, increase `ANDROID_VERSION_CODE` and optionally `ANDROID_VERSION_NAME` in `.env` or CI env vars.
+- Signed release builds require `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`.
+- Play publishing also requires `PLAY_SERVICE_ACCOUNT_JSON_PATH`; `PLAY_TRACK` defaults to `internal` and `PLAY_RELEASE_STATUS` defaults to `DRAFT`.
 - Upload with `publishAab`; for user-visible updates, publish to a Play track with a non-draft release status.
