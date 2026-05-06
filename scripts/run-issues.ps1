@@ -7,7 +7,9 @@ $repo = (Resolve-Path ".").Path
 # P1-2 -> second ## P1. section
 # P1-3 -> third  ## P1. section
 # P2-1 -> first  ## P2. section
-# ...
+# P2-2 -> second ## P2. section
+# P2-3 -> third  ## P2. section
+# P3-1 -> first  ## P3. section
 $issueIds = @(
     "P1-1",
     "P1-2",
@@ -83,16 +85,19 @@ Rules:
 - Update only this issue's checkbox and 처리 기록 in issues.md after completion.
 - Do not rename issue headings in issues.md.
 - Do not modify unrelated issue sections.
+- Do not delete files unless the issue explicitly requires it.
+- Do not run destructive git commands such as reset, clean, rebase, or force push.
+- Do not modify files outside this repository.
+- Do not install global packages or change system/user-level configuration.
 - If verification fails, document the failure in 처리 기록 and stop after summarizing the cause.
 "@
 
-    Write-Host "About to run: codex exec --ephemeral for ${issueId}"
+    Write-Host "About to run: codex exec --ephemeral --yolo for ${issueId}"
 
     $prompt | codex exec `
         --cd "$repo" `
         --ephemeral `
-        --sandbox workspace-write `
-        --ask-for-approval never `
+        --yolo `
         --output-last-message "codex-${issueId}-summary.md" `
         -
 

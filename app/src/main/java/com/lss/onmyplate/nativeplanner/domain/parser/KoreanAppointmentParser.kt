@@ -86,7 +86,11 @@ class KoreanAppointmentParser(
         }
         val weekday = weekdayMap.entries.firstOrNull { it.key in text }?.value
         if (weekday != null) {
-            val start = if (weekOffset == null) baseDate else baseDate.plusWeeks(weekOffset)
+            val start = if (weekOffset == null) {
+                baseDate
+            } else {
+                baseDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).plusWeeks(weekOffset)
+            }
             val adjusted = start.with(TemporalAdjusters.nextOrSame(weekday))
             return if (weekOffset == null && adjusted.isBefore(baseDate)) adjusted.plusWeeks(1) else adjusted
         }
@@ -133,17 +137,17 @@ class KoreanAppointmentParser(
         Regex("(?:장소|위치)[:：]?\\s*([^\\n,]+)").find(text)?.let {
             return it.groupValues[1].trim().takeIf { value -> value.isNotBlank() }?.take(40)
         }
-        val at = Regex("([가-힣A-Za-z0-9\\s]+?)(?:에서|로)\\s*(?:.+?(?:만나|보기|회의|미팅|약속))").find(text)
-        if (at != null) {
-            return at.groupValues[1].trim().takeIf { it.isNotBlank() }?.take(40)
-        }
-
         val cleaned = text
             .replace(Regex("(오늘|내일|모레|이번 주|다음 주|담주|\\d{1,2}월\\s*\\d{1,2}일)"), "")
             .replace(Regex(weekdayMap.keys.joinToString("|") { Regex.escape(it) }), "")
             .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}[:：]\\d{2}"), "")
             .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}시(?:\\s*\\d{1,2}분|\\s*반)?"), "")
             .trim()
+
+        val at = Regex("([가-힣A-Za-z0-9\\s]+?)(?:에서|로)\\s*(?:.+?(?:만나|보기|회의|미팅|약속))").find(cleaned)
+        if (at != null) {
+            return at.groupValues[1].trim().takeIf { it.isNotBlank() }?.take(40)
+        }
 
         Regex("([가-힣A-Za-z0-9\\s]+?)\\s*(?:약속|회의|미팅)$").find(cleaned)?.let {
             return it.groupValues[1].trim().takeIf { value -> value.isNotBlank() }?.take(40)
