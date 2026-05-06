@@ -34,7 +34,7 @@ Codex가 이 문서를 기준으로 작업할 때는 아래 규칙을 따른다.
 
 - [x] P0-1. 한글 문자열/정규식 인코딩 깨짐 복구
 - [x] P1-1. 한국어 파서 테스트 추가
-- [ ] P1-2. 공유 출처 `sourceApp` 저장 누락 수정
+- [x] P1-2. 공유 출처 `sourceApp` 저장 누락 수정
 - [ ] P1-3. 위젯 클릭 라우팅 정리
 - [ ] P2-1. release/play 환경변수 요구 시점 완화
 - [ ] P2-2. Gradle Wrapper 추가
@@ -174,7 +174,8 @@ Codex가 이 문서를 기준으로 작업할 때는 아래 규칙을 따른다.
 
 ### 처리 기록
 
-- 미처리
+- 2026-05-07: `AppointmentCandidateEntity`에 nullable `sourceApp` 컬럼을 추가하고, 공유 수신 시 전달된 `sourceApp`을 후보에 저장한 뒤 일정 저장 시 `ScheduleEntity.sourceApp`으로 이어지도록 수정.
+- 2026-05-07: Room schema version 1 상태에서 배포 전 스키마로 보고 migration 없이 `app/schemas/.../1.json`을 직접 갱신. `:app:assembleDebug` 검증 성공. `sourceApp` 미사용 경고 제거 확인. 기존 범위 경고: Gradle 9.0 호환성 deprecation 경고.
 
 ---
 

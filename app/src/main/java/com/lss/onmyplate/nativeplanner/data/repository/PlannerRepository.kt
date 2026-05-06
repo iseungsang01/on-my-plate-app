@@ -28,6 +28,7 @@ class PlannerRepository(
         val entity = AppointmentCandidateEntity(
             id = UUID.randomUUID().toString(),
             rawText = rawText,
+            sourceApp = sourceApp?.takeIf { it.isNotBlank() },
             extractedTitle = parsed.title,
             extractedStartAt = parsed.startAt,
             extractedEndAt = parsed.endAt,
@@ -130,7 +131,7 @@ class PlannerRepository(
                 memo = null,
                 status = scheduleStatus.dbValue,
                 sourceText = candidate.rawText,
-                sourceApp = null,
+                sourceApp = candidate.sourceApp,
                 createdAt = now,
                 updatedAt = now,
             ),

@@ -7,6 +7,7 @@ import androidx.room.PrimaryKey
 data class AppointmentCandidateEntity(
     @PrimaryKey val id: String,
     val rawText: String,
+    val sourceApp: String?,
     val extractedTitle: String,
     val extractedStartAt: Long?,
     val extractedEndAt: Long?,
