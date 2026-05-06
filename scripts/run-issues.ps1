@@ -2,6 +2,12 @@ $ErrorActionPreference = "Stop"
 
 $repo = (Resolve-Path ".").Path
 
+# Synthetic IDs:
+# P1-1 -> first  ## P1. section
+# P1-2 -> second ## P1. section
+# P1-3 -> third  ## P1. section
+# P2-1 -> first  ## P2. section
+# ...
 $issueIds = @(
     "P1-1",
     "P1-2",
@@ -17,17 +23,39 @@ function Get-IssueSection {
         [string]$IssueId
     )
 
-    $issues = Get-Content ".\issues.md" -Raw
+    $issuesPath = Join-Path $repo "issues.md"
 
-    # Matches: ## P1-1. title ... until next ## Pn-m. section or end of file
-    $pattern = "(?ms)^## $([regex]::Escape($IssueId))\..*?(?=^## P\d+-\d+\.|\z)"
-    $match = [regex]::Match($issues, $pattern)
-
-    if (-not $match.Success) {
-        throw "Issue section not found: ${IssueId}"
+    if (-not (Test-Path $issuesPath)) {
+        throw "issues.md not found at: ${issuesPath}"
     }
 
-    return $match.Value
+    $issues = Get-Content $issuesPath -Raw -Encoding UTF8
+
+    if ($IssueId -notmatch '^P(\d+)-(\d+)$') {
+        throw "Invalid issue id format: ${IssueId}. Expected format like P1-1."
+    }
+
+    $priority = $Matches[1]
+    $ordinal = [int]$Matches[2]
+
+    # Match sections like:
+    # ## P1. title
+    # until next ## Pn. heading or end of file
+    #
+    # This keeps issues.md unchanged while allowing synthetic IDs.
+    $pattern = "(?ms)^##\s+P${priority}\.\s+.*?(?=^##\s+P\d+\.\s+|\z)"
+    $matches = [regex]::Matches($issues, $pattern)
+
+    if ($matches.Count -lt $ordinal) {
+        Write-Host "Available priority issue headings:"
+        Select-String -Path $issuesPath -Pattern '^##\s+P\d+\.' | ForEach-Object {
+            Write-Host $_.Line
+        }
+
+        throw "Issue section not found: ${IssueId}. Found only $($matches.Count) section(s) for P${priority}."
+    }
+
+    return $matches[$ordinal - 1].Value
 }
 
 foreach ($issueId in $issueIds) {
@@ -39,7 +67,9 @@ foreach ($issueId in $issueIds) {
     $issueText = Get-IssueSection -IssueId $issueId
 
     $prompt = @"
-Implement only the following issue from issues.md.
+Implement only the following extracted issue section from issues.md.
+
+Synthetic issue id: ${issueId}
 
 $issueText
 
@@ -50,7 +80,9 @@ Rules:
 - Inspect the related files before editing.
 - Make minimal changes.
 - Run the verification commands listed in the issue.
-- Update only the matching checkbox and 처리 기록 in issues.md after completion.
+- Update only this issue's checkbox and 처리 기록 in issues.md after completion.
+- Do not rename issue headings in issues.md.
+- Do not modify unrelated issue sections.
 - If verification fails, document the failure in 처리 기록 and stop after summarizing the cause.
 "@
 
