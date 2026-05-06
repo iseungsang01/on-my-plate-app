@@ -17,3 +17,11 @@ The app registers an Android `ACTION_SEND` target for `text/plain`. Share text f
 - Candidate edit and conflict resolution screens.
 
 No KakaoTalk scraping, login, background chat monitoring, web app, cloud sync, or LLM API is included.
+
+## AAB auto-update flow
+
+- The app checks Google Play In-App Updates on launch and foreground return.
+- If Play reports a newer AAB version and allows an immediate update, the Play update UI opens automatically.
+- If an immediate update was interrupted, the app resumes it from `onResume()`.
+- Before publishing a new AAB, increase `ANDROID_VERSION_CODE` and optionally `ANDROID_VERSION_NAME` in `.env` or CI env vars.
+- Upload with `publishAab`; for user-visible updates, publish to a Play track with a non-draft release status.

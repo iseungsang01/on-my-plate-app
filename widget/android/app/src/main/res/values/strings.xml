@@ -1,7 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">On My Plate Planner</string>
     <string name="summary_widget_description">Weekly timetable snapshot</string>
     <string name="summary_widget_prev_week">&lt;</string>
     <string name="summary_widget_next_week">&gt;</string>
-    <string name="summary_widget_toggle_viewport">&#8597;</string>
 </resources>

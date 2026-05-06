@@ -7,6 +7,8 @@ import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.domain.parser.GeminiAppointmentParser
 import com.lss.onmyplate.nativeplanner.domain.parser.KoreanAppointmentParser
 import com.lss.onmyplate.nativeplanner.notification.AppointmentNotificationManager
+import com.lss.onmyplate.nativeplanner.widget.PlannerWidgetSync
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 
@@ -29,6 +31,11 @@ class OnMyPlateApp : Application() {
         super.onCreate()
         instance = this
         notifications.ensureChannels()
+        appScope.launch {
+            repository.observeSchedules().collect { schedules ->
+                PlannerWidgetSync.saveSnapshot(this@OnMyPlateApp, schedules)
+            }
+        }
     }
 
     companion object {

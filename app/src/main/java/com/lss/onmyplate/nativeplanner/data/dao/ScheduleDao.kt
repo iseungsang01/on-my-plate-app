@@ -13,6 +13,9 @@ interface ScheduleDao {
     @Query("SELECT * FROM schedules ORDER BY startAt ASC")
     fun observeAll(): Flow<List<ScheduleEntity>>
 
+    @Query("SELECT * FROM schedules ORDER BY startAt ASC")
+    suspend fun getAll(): List<ScheduleEntity>
+
     @Query("SELECT * FROM schedules WHERE (:newStart < COALESCE(endAt, startAt + 3600000)) AND (:newEnd > startAt) ORDER BY startAt ASC")
     suspend fun findConflicts(newStart: Long, newEnd: Long): List<ScheduleEntity>
 
