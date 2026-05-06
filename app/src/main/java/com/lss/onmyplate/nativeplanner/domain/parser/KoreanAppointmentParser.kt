@@ -94,6 +94,16 @@ class KoreanAppointmentParser(
     }
 
     private fun parseTime(text: String): TimeParse {
+        val colonTime = Regex("(오전|오후|저녁|밤)?\\s*(\\d{1,2})[:：](\\d{2})").find(text)
+        if (colonTime != null) {
+            val meridiem = colonTime.groupValues[1]
+            var hour = colonTime.groupValues[2].toInt()
+            val minute = colonTime.groupValues[3].toInt()
+            if ((meridiem == "오후" || meridiem == "저녁" || meridiem == "밤") && hour < 12) hour += 12
+            if (meridiem == "오전" && hour == 12) hour = 0
+            return TimeParse(LocalTime.of(hour.coerceIn(0, 23), minute.coerceIn(0, 59)), TimeConfidence.High)
+        }
+
         val explicit = Regex("(오전|오후|아침|점심|저녁|밤)?\\s*(\\d{1,2})시(?:\\s*(\\d{1,2})분|\\s*반)?").find(text)
         if (explicit != null) {
             val meridiem = explicit.groupValues[1]
@@ -124,13 +134,36 @@ class KoreanAppointmentParser(
             return it.groupValues[1].trim().takeIf { value -> value.isNotBlank() }?.take(40)
         }
         val at = Regex("([가-힣A-Za-z0-9\\s]+?)(?:에서|로)\\s*(?:.+?(?:만나|보기|회의|미팅|약속))").find(text)
-        return at?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() }?.take(40)
+        if (at != null) {
+            return at.groupValues[1].trim().takeIf { it.isNotBlank() }?.take(40)
+        }
+
+        val cleaned = text
+            .replace(Regex("(오늘|내일|모레|이번 주|다음 주|담주|\\d{1,2}월\\s*\\d{1,2}일)"), "")
+            .replace(Regex(weekdayMap.keys.joinToString("|") { Regex.escape(it) }), "")
+            .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}[:：]\\d{2}"), "")
+            .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}시(?:\\s*\\d{1,2}분|\\s*반)?"), "")
+            .trim()
+
+        Regex("([가-힣A-Za-z0-9\\s]+?)\\s*(?:약속|회의|미팅)$").find(cleaned)?.let {
+            return it.groupValues[1].trim().takeIf { value -> value.isNotBlank() }?.take(40)
+        }
+
+        return Regex("([가-힣A-Za-z0-9\\s]*(?:병원|카페|식당|홍대|강남)[가-힣A-Za-z0-9\\s]*)")
+            .find(cleaned)
+            ?.groupValues
+            ?.get(1)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.take(40)
     }
 
     private fun parseTitle(text: String): String {
         val firstLine = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
         return firstLine
             .replace(Regex("(오늘|내일|모레|이번 주|다음 주|담주|\\d{1,2}월\\s*\\d{1,2}일)"), "")
+            .replace(Regex(weekdayMap.keys.joinToString("|") { Regex.escape(it) }), "")
+            .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}[:：]\\d{2}"), "")
             .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}시(?:\\s*\\d{1,2}분|\\s*반)?"), "")
             .replace(Regex("\\s+"), " ")
             .trim()
