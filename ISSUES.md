@@ -37,7 +37,7 @@ Codex가 이 문서를 기준으로 작업할 때는 아래 규칙을 따른다.
 - [x] P1-2. 공유 출처 `sourceApp` 저장 누락 수정
 - [ ] P1-3. 위젯 클릭 라우팅 정리
 - [x] P2-1. release/play 환경변수 요구 시점 완화
-- [ ] P2-2. Gradle Wrapper 추가
+- [x] P2-2. Gradle Wrapper 추가
 - [ ] P2-3. 위젯 snapshot 구조 정리
 - [ ] P3-1. 전반 테스트 보강
 ---
@@ -307,7 +307,8 @@ Codex가 이 문서를 기준으로 작업할 때는 아래 규칙을 따른다.
 
 ### 처리 기록
 
-- 미처리
+- 2026-05-07: Gradle Wrapper 파일(`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.properties`, `gradle/wrapper/gradle-wrapper.jar`)을 Gradle 8.14.3 기준으로 추가하고, README의 debug 빌드 명령을 wrapper 기준으로 갱신.
+- 2026-05-07: `.\gradlew.bat :app:assembleDebug` 검증 성공. 현재 Windows 환경에 `bash`/`sh`가 없어 Unix 명령은 실행하지 못했으나, `gradlew`와 wrapper JAR/properties 구조가 추가된 것을 확인.
 
 ---
 

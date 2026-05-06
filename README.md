@@ -8,6 +8,18 @@ Open this folder in Android Studio, let Gradle sync, then run the `app` configur
 
 Debug builds do not require Android release signing or Google Play publishing variables. For a local debug build, provide only app/runtime values such as `ANDROID_APPLICATION_ID`, version fields, and optional Gemini settings when needed.
 
+Build a debug APK with the Gradle Wrapper:
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+```
+
+On Unix-like shells:
+
+```sh
+./gradlew :app:assembleDebug
+```
+
 The app registers an Android `ACTION_SEND` target for `text/plain`. Share text from KakaoTalk, SMS, memo apps, browsers, or any Android app into `On My Plate Planner`; the share receiver parses the text, creates an appointment candidate, and shows a native notification with inline title input and actions.
 
 ## MVP Scope
