@@ -1,23 +1,58 @@
+import com.github.triplet.gradle.androidpublisher.ReleaseStatus
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.kapt")
+    id("com.github.triplet.play")
 }
+
+fun envOrDotenv(name: String): String? {
+    val envValue = System.getenv(name)?.takeIf { it.isNotBlank() }
+    if (envValue != null) return envValue
+
+    val dotenv = rootProject.file(".env")
+    if (!dotenv.isFile) return null
+
+    return dotenv.readLines()
+        .asSequence()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains("=") }
+        .map {
+            val key = it.substringBefore("=").trim()
+            val value = it.substringAfter("=").trim().trim('"', '\'')
+            key to value
+        }
+        .firstOrNull { it.first == name }
+        ?.second
+        ?.takeIf { it.isNotBlank() }
+}
+
+fun requiredEnvOrDotenv(name: String): String =
+    envOrDotenv(name) ?: error("Missing $name. Add it to .env or the process environment.")
 
 android {
     namespace = "com.lss.onmyplate.nativeplanner"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.lss.onmyplate.nativeplanner"
+        applicationId = envOrDotenv("ANDROID_APPLICATION_ID") ?: "com.lss.onmyplate.nativeplanner"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("String", "GEMINI_API_KEY", "\"${envOrDotenv("GEMINI_API_KEY").orEmpty()}\"")
+        buildConfigField("String", "GEMINI_MODEL", "\"${envOrDotenv("GEMINI_MODEL") ?: "gemini-3-27b-it"}\"")
+        buildConfigField(
+            "String",
+            "GEMINI_API_BASE_URL",
+            "\"${envOrDotenv("GEMINI_API_BASE_URL") ?: "https://generativelanguage.googleapis.com/v1beta"}\"",
+        )
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -32,6 +67,34 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"
     }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(requiredEnvOrDotenv("ANDROID_KEYSTORE_PATH"))
+            storePassword = requiredEnvOrDotenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias = requiredEnvOrDotenv("ANDROID_KEY_ALIAS")
+            keyPassword = requiredEnvOrDotenv("ANDROID_KEY_PASSWORD")
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+}
+
+play {
+    serviceAccountCredentials.set(file(requiredEnvOrDotenv("PLAY_SERVICE_ACCOUNT_JSON_PATH")))
+    track.set(envOrDotenv("PLAY_TRACK") ?: "internal")
+    releaseStatus.set(ReleaseStatus.valueOf(envOrDotenv("PLAY_RELEASE_STATUS") ?: "DRAFT"))
+    defaultToAppBundles.set(true)
+}
+
+tasks.register("publishAab") {
+    group = "publishing"
+    description = "Builds the signed release AAB and uploads it to the configured Google Play track."
+    dependsOn("publishReleaseBundle")
 }
 
 kapt {

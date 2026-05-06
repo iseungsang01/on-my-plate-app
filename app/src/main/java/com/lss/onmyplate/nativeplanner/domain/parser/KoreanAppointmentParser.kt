@@ -12,6 +12,7 @@ import java.time.temporal.TemporalAdjusters
 
 class KoreanAppointmentParser(
     private val zoneId: ZoneId = ZoneId.of("Asia/Seoul"),
+    private val llmParser: GeminiAppointmentParser? = null,
 ) {
     private val weekdayMap = mapOf(
         "월요일" to DayOfWeek.MONDAY,
@@ -30,7 +31,13 @@ class KoreanAppointmentParser(
         "일욜" to DayOfWeek.SUNDAY,
     )
 
-    fun parse(rawText: String, receivedAt: Long): AppointmentParseResult {
+    suspend fun parse(rawText: String, receivedAt: Long): AppointmentParseResult {
+        val local = parseLocally(rawText, receivedAt)
+        if (local.startAt != null && local.confidence >= 0.67f) return local
+        return llmParser?.parse(rawText, receivedAt)?.mergeFallback(local) ?: local
+    }
+
+    private fun parseLocally(rawText: String, receivedAt: Long): AppointmentParseResult {
         val baseDate = Instant.ofEpochMilli(receivedAt).atZone(zoneId).toLocalDate()
         val date = parseDate(rawText, baseDate)
         val timeParse = parseTime(rawText)
@@ -51,10 +58,26 @@ class KoreanAppointmentParser(
         )
     }
 
+    private fun AppointmentParseResult.mergeFallback(fallback: AppointmentParseResult): AppointmentParseResult =
+        copy(
+            title = title.ifBlank { fallback.title },
+            startAt = startAt ?: fallback.startAt,
+            endAt = endAt ?: fallback.endAt,
+            location = location ?: fallback.location,
+            confidence = confidence.coerceAtLeast(fallback.confidence),
+        )
+
     private fun parseDate(text: String, baseDate: LocalDate): LocalDate? {
         if ("오늘" in text) return baseDate
         if ("내일" in text) return baseDate.plusDays(1)
         if ("모레" in text) return baseDate.plusDays(2)
+
+        Regex("(\\d{1,2})월\\s*(\\d{1,2})일").find(text)?.let {
+            val month = it.groupValues[1].toInt()
+            val day = it.groupValues[2].toInt()
+            val candidate = LocalDate.of(baseDate.year, month, day)
+            return if (candidate.isBefore(baseDate)) candidate.plusYears(1) else candidate
+        }
 
         val weekOffset = when {
             "다음 주" in text || "담주" in text -> 1L
@@ -71,17 +94,21 @@ class KoreanAppointmentParser(
     }
 
     private fun parseTime(text: String): TimeParse {
-        val explicit = Regex("(오전|오후)?\\s*(\\d{1,2})시\\s*(반)?").find(text)
+        val explicit = Regex("(오전|오후|아침|점심|저녁|밤)?\\s*(\\d{1,2})시(?:\\s*(\\d{1,2})분|\\s*반)?").find(text)
         if (explicit != null) {
             val meridiem = explicit.groupValues[1]
             var hour = explicit.groupValues[2].toInt()
-            val minute = if (explicit.groupValues[3].isNotBlank()) 30 else 0
-            if (meridiem == "오후" && hour < 12) hour += 12
+            val minute = when {
+                explicit.groupValues[3].isNotBlank() -> explicit.groupValues[3].toInt()
+                explicit.value.contains("반") -> 30
+                else -> 0
+            }
+            if ((meridiem == "오후" || meridiem == "저녁" || meridiem == "밤") && hour < 12) hour += 12
             if (meridiem == "오전" && hour == 12) hour = 0
             if (meridiem.isBlank() && hour in 1..7) {
                 return TimeParse(LocalTime.of(hour, minute), TimeConfidence.Medium)
             }
-            return TimeParse(LocalTime.of(hour.coerceIn(0, 23), minute), TimeConfidence.High)
+            return TimeParse(LocalTime.of(hour.coerceIn(0, 23), minute.coerceIn(0, 59)), TimeConfidence.High)
         }
 
         return when {
@@ -93,20 +120,21 @@ class KoreanAppointmentParser(
     }
 
     private fun parseLocation(text: String): String? {
-        val marker = Regex("(장소|위치)[:：]?\\s*([^\\n,]+)").find(text)
-        if (marker != null) return marker.groupValues[2].trim().takeIf { it.isNotBlank() }
-        val at = Regex("([가-힣A-Za-z0-9\\s]+)(에서|로)\\s*(만나|보자|약속)").find(text)
-        return at?.groupValues?.get(1)?.trim()?.take(40)
+        Regex("(?:장소|위치)[:：]?\\s*([^\\n,]+)").find(text)?.let {
+            return it.groupValues[1].trim().takeIf { value -> value.isNotBlank() }?.take(40)
+        }
+        val at = Regex("([가-힣A-Za-z0-9\\s]+?)(?:에서|로)\\s*(?:.+?(?:만나|보기|회의|미팅|약속))").find(text)
+        return at?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() }?.take(40)
     }
 
     private fun parseTitle(text: String): String {
         val firstLine = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
         return firstLine
-            .replace(Regex("(오늘|내일|모레|이번 주|다음 주|담주)"), "")
-            .replace(Regex("(오전|오후)?\\s*\\d{1,2}시\\s*반?"), "")
+            .replace(Regex("(오늘|내일|모레|이번 주|다음 주|담주|\\d{1,2}월\\s*\\d{1,2}일)"), "")
+            .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}시(?:\\s*\\d{1,2}분|\\s*반)?"), "")
             .replace(Regex("\\s+"), " ")
             .trim()
-            .ifBlank { "새 약속" }
+            .ifBlank { "약속" }
             .take(60)
     }
 

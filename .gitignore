@@ -11,3 +11,8 @@ local.properties
 secrets/
 *.jks
 *.keystore
+
+.omx
+.omx/cache
+.omx/logs
+.omx/state
