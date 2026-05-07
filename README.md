@@ -32,6 +32,15 @@ The app registers an Android `ACTION_SEND` target for `text/plain`. Share text f
 
 No KakaoTalk scraping, login, background chat monitoring, web app, cloud sync, or LLM API is included.
 
+## Native widget snapshot scope
+
+The native Android widget is part of this MVP and renders only Room-backed schedules saved by the native planner.
+
+- `PlannerWidgetSync` writes a `native-room-schedules-v1` summary snapshot.
+- The snapshot includes `manualEventsByDate` grouped by local date in `Asia/Seoul`.
+- It intentionally does not write `autoPlans`, category columns, or generated `days`; the native widget derives the visible week from `manualEventsByDate`.
+- The reusable `widget/` bundle has a wider snapshot model for host apps that already have manual daily schedules plus auto/category plans. See `widget/README.md` for that contract.
+
 ## AAB auto-update flow
 
 - The app checks Google Play In-App Updates on launch and foreground return.
@@ -41,3 +50,4 @@ No KakaoTalk scraping, login, background chat monitoring, web app, cloud sync, o
 - Signed release builds require `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`.
 - Play publishing also requires `PLAY_SERVICE_ACCOUNT_JSON_PATH`; `PLAY_TRACK` defaults to `internal` and `PLAY_RELEASE_STATUS` defaults to `DRAFT`.
 - Upload with `publishAab`; for user-visible updates, publish to a Play track with a non-draft release status.
+

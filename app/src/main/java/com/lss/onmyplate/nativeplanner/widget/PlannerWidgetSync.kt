@@ -35,6 +35,9 @@ object PlannerWidgetSync {
     }
 
     fun saveSnapshot(context: Context, schedules: List<ScheduleEntity>) {
+        // Native MVP scope: the Android app only owns Room-backed schedules.
+        // The reusable widget bundle under widget/ can additionally provide auto/category plans,
+        // but this native snapshot intentionally exports manualEventsByDate only.
         val manualEventsByDate = JSONObject()
         schedules
             .sortedBy { it.startAt }
@@ -55,11 +58,12 @@ object PlannerWidgetSync {
 
         val monday = LocalDate.now(zoneId).with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
         val snapshot = JSONObject()
+            .put("schema", "native-room-schedules-v1")
+            .put("generatedAt", Instant.now().toString())
             .put("weekStart", monday.toString())
             .put("viewportStartMinute", 8 * 60)
             .put("viewportEndMinute", 24 * 60)
             .put("manualEventsByDate", manualEventsByDate)
-            .put("autoPlans", JSONArray())
 
         PlannerWidgetStore.saveSummarySnapshot(context.applicationContext, snapshot.toString())
     }

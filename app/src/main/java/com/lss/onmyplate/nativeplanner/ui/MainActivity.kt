@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import com.lss.onmyplate.nativeplanner.BuildConfig
 import com.lss.onmyplate.nativeplanner.OnMyPlateApp
 import com.google.android.play.core.appupdate.AppUpdateManager
 import com.google.android.play.core.appupdate.AppUpdateManagerFactory
@@ -32,8 +33,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        maybeRequestNotifications()
-        checkForAppUpdate()
         routeState.value = startRoute(intent)
         setContent {
             MaterialTheme {
@@ -46,6 +45,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        maybeRequestNotifications()
+        checkForAppUpdate()
     }
 
     override fun onResume() {
@@ -60,32 +61,44 @@ class MainActivity : ComponentActivity() {
 
     private fun maybeRequestNotifications() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            runCatching {
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
     }
 
     private fun checkForAppUpdate() {
-        appUpdateManager.appUpdateInfo.addOnSuccessListener { appUpdateInfo ->
-            val isUpdateAvailable = appUpdateInfo.updateAvailability() == UpdateAvailability.UPDATE_AVAILABLE
-            val canStartImmediateUpdate = appUpdateInfo.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE)
-            if (isUpdateAvailable && canStartImmediateUpdate) {
-                appUpdateManager.startUpdateFlowForResult(
-                    appUpdateInfo,
-                    appUpdateLauncher,
-                    AppUpdateOptions.newBuilder(AppUpdateType.IMMEDIATE).build(),
-                )
+        if (BuildConfig.DEBUG) return
+        runCatching {
+            appUpdateManager.appUpdateInfo.addOnSuccessListener { appUpdateInfo ->
+                val isUpdateAvailable = appUpdateInfo.updateAvailability() == UpdateAvailability.UPDATE_AVAILABLE
+                val canStartImmediateUpdate = appUpdateInfo.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE)
+                if (isUpdateAvailable && canStartImmediateUpdate) {
+                    runCatching {
+                        appUpdateManager.startUpdateFlowForResult(
+                            appUpdateInfo,
+                            appUpdateLauncher,
+                            AppUpdateOptions.newBuilder(AppUpdateType.IMMEDIATE).build(),
+                        )
+                    }
+                }
             }
         }
     }
 
     private fun resumeAppUpdateIfNeeded() {
-        appUpdateManager.appUpdateInfo.addOnSuccessListener { appUpdateInfo ->
-            if (appUpdateInfo.updateAvailability() == UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS) {
-                appUpdateManager.startUpdateFlowForResult(
-                    appUpdateInfo,
-                    appUpdateLauncher,
-                    AppUpdateOptions.newBuilder(AppUpdateType.IMMEDIATE).build(),
-                )
+        if (BuildConfig.DEBUG) return
+        runCatching {
+            appUpdateManager.appUpdateInfo.addOnSuccessListener { appUpdateInfo ->
+                if (appUpdateInfo.updateAvailability() == UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS) {
+                    runCatching {
+                        appUpdateManager.startUpdateFlowForResult(
+                            appUpdateInfo,
+                            appUpdateLauncher,
+                            AppUpdateOptions.newBuilder(AppUpdateType.IMMEDIATE).build(),
+                        )
+                    }
+                }
             }
         }
     }

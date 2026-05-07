@@ -2,7 +2,7 @@
 
 작성일: 2026-05-07 KST  
 기준 커밋: `93531f8 widget 옮김`  
-상태: `:app:assembleDebug` 빌드 성공, 테스트 없음
+상태: `:app:testDebugUnitTest :app:assembleDebug` 빌드 성공, 파서 JVM 테스트 있음
 
 ## 사용 방법
 
@@ -35,11 +35,16 @@ Codex가 이 문서를 기준으로 작업할 때는 아래 규칙을 따른다.
 - [x] P0-1. 한글 문자열/정규식 인코딩 깨짐 복구
 - [x] P1-1. 한국어 파서 테스트 추가
 - [x] P1-2. 공유 출처 `sourceApp` 저장 누락 수정
-- [ ] P1-3. 위젯 클릭 라우팅 정리
+- [x] P1-3. 위젯 클릭 라우팅 정리
 - [x] P2-1. release/play 환경변수 요구 시점 완화
 - [x] P2-2. Gradle Wrapper 추가
-- [ ] P2-3. 위젯 snapshot 구조 정리
-- [ ] P3-1. 전반 테스트 보강
+- [x] P2-3. 위젯 snapshot 구조 정리
+- [x] P3-1. 전반 테스트 보강
+
+## 남은 작업 요약
+
+- 현재 문서 기준 미처리 이슈 없음.
+
 ---
 
 ## P0. 한글 문자열/정규식 인코딩 깨짐 복구
@@ -230,6 +235,7 @@ Codex가 이 문서를 기준으로 작업할 때는 아래 규칙을 따른다.
 
 - 2026-05-07: 선택 B로 정리. `PlannerWidgetStore.savePendingRoute()`와 `KEY_PENDING_ROUTE`를 제거하고, 위젯 루트 클릭 액션은 pending route 저장 없이 `MainActivity`를 열어 기본 `Planner` 화면으로 이동하도록 단순화.
 - 2026-05-07: `.\gradlew.bat :app:assembleDebug` 검증 실패. 원인: 저장소에 Gradle Wrapper(`gradlew.bat`)가 없고 현재 환경의 `PATH`에도 `gradle` 명령이 없어 빌드를 실행할 수 없음. 남은 작업: Gradle Wrapper 추가 또는 Gradle 사용 가능 환경에서 `:app:assembleDebug` 재실행.
+- 2026-05-07: P2-2에서 Gradle Wrapper가 추가된 뒤 `.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug` 재검증 성공. native `PlannerWidgetStore`에는 `KEY_PENDING_ROUTE`/`savePendingRoute()`가 없고, `SummaryWidgetProvider` 루트 클릭은 `ACTION_OPEN_PLANNER`로 `MainActivity` 기본 `Planner` 화면을 여는 것을 확인.
 
 ---
 
@@ -345,7 +351,9 @@ native `PlannerWidgetSync`는 Room `schedules`만 snapshot에 넣고 `autoPlans`
 
 ### 처리 기록
 
-- 미처리
+- 2026-05-07: native MVP 범위를 Room-backed 수동 일정만 표시하는 것으로 결정. `PlannerWidgetSync` snapshot에 `schema = native-room-schedules-v1`, `generatedAt`, `manualEventsByDate`만 저장하고 빈 `autoPlans`는 제거.
+- 2026-05-07: native `SummaryWidgetProvider`에서 `autoPlans` 파싱/병합용 dead code를 제거해 native 위젯이 `manualEventsByDate`만 렌더링하도록 정리. 재사용용 `widget/` bundle의 manual/auto/category snapshot 모델과 native 앱 위젯의 차이를 `README.md`, `widget/README.md`에 문서화.
+- 2026-05-07: `.\gradlew.bat :app:assembleDebug` 검증 성공. 최초 sandbox 실행은 사용자 Gradle cache lock 파일 접근 권한으로 실패했고, 승인된 escalated 실행에서 성공. 기존 범위 경고: Room kapt 옵션 인식 경고, Gradle 9.0 호환성 deprecation 경고.
 
 ---
 
@@ -353,7 +361,7 @@ native `PlannerWidgetSync`는 Room `schedules`만 snapshot에 넣고 `autoPlans`
 
 ### 증상
 
-현재 자동화 테스트가 없다.
+현재 자동화 테스트는 한국어 파서 중심이며, 후보 저장/충돌 감지/위젯 snapshot 회귀 테스트가 없다.
 
 ### 영향
 
@@ -380,11 +388,62 @@ native `PlannerWidgetSync`는 Room `schedules`만 snapshot에 넣고 `autoPlans`
 
 ### 처리 기록
 
-- 미처리
+- 2026-05-07: JVM unit test 보강. `ConflictDetectorTest`로 기본 종료 시각/겹침/경계 조건을 검증하고, `PlannerRepositoryTest`로 Room in-memory DB 기반 후보 생성(sourceApp 저장), 후보 저장→일정 생성→후보 confirmed 전환, 충돌 시 저장 보류 흐름을 검증. `PlannerWidgetSyncTest`로 native snapshot schema, `manualEventsByDate` 날짜별 정렬/분 그룹화, `autoPlans` 미포함, open-ended 일정 종료 분 보정을 검증.
+- 2026-05-07: Robolectric 기반 Room/SharedPreferences unit test를 위해 `app/build.gradle.kts`에 unit test Android resources 포함과 `androidx.test:core`, `org.robolectric:robolectric` test dependency 추가.
+- 2026-05-07: `.\gradlew.bat :app:testDebugUnitTest` 검증 성공. 기존 범위 경고: Room kapt 옵션 인식 경고, Gradle 9.0 호환성 deprecation 경고.
+- 2026-05-07: `.\gradlew.bat :app:assembleDebug` 검증 성공. 기존 범위 경고: Gradle 9.0 호환성 deprecation 경고.
 
 ---
 
 ## 현재 검증 기록
+
+### 2026-05-07 P3-1 처리
+
+명령:
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest
+.\gradlew.bat :app:assembleDebug
+```
+
+결과:
+
+```text
+BUILD SUCCESSFUL
+BUILD SUCCESSFUL
+```
+
+확인:
+
+- `ConflictDetector`, `PlannerRepository`, `PlannerWidgetSync` unit test 추가 및 통과.
+- P3-1 체크박스 완료 처리.
+- 기존 범위 경고: Room kapt 옵션 인식 경고, Gradle 9.0 호환성 deprecation 경고.
+
+---
+
+### 2026-05-07 전체 상태 재확인
+
+명령:
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug
+```
+
+결과:
+
+```text
+BUILD SUCCESSFUL
+```
+
+확인:
+
+- P1-3 코드 상태 확인: native `PlannerWidgetStore`에서 pending route 저장 코드 제거됨.
+- P1-3 코드 상태 확인: native `SummaryWidgetProvider` 위젯 루트 클릭은 `MainActivity`를 열어 기본 `Planner` 화면으로 이동.
+- 당시 남은 미처리 항목: P3-1.
+
+---
+
+## 이전 검증 기록
 
 ### 2026-05-07
 

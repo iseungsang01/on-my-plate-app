@@ -477,10 +477,6 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
         );
     }
 
-    private static int toPlannerDayOfWeek(Calendar calendar) {
-        return calendar.get(Calendar.DAY_OF_WEEK) - 1;
-    }
-
     private static class WidgetSize {
         final int widthPx;
         final int heightPx;
@@ -534,22 +530,19 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
         final int viewportStartMinute;
         final int viewportEndMinute;
         final Map<String, List<ScheduleItemSnapshot>> manualEventsByDate;
-        final List<AutoPlanSnapshot> autoPlans;
 
         SharedPreferencesSnapshot(
             String weekStartDate,
             int weekOffset,
             int viewportStartMinute,
             int viewportEndMinute,
-            Map<String, List<ScheduleItemSnapshot>> manualEventsByDate,
-            List<AutoPlanSnapshot> autoPlans
+            Map<String, List<ScheduleItemSnapshot>> manualEventsByDate
         ) {
             this.weekStartDate = weekStartDate;
             this.weekOffset = weekOffset;
             this.viewportStartMinute = viewportStartMinute;
             this.viewportEndMinute = viewportEndMinute;
             this.manualEventsByDate = manualEventsByDate;
-            this.autoPlans = autoPlans;
         }
 
         Calendar getWeekStartForOffset(int offset) {
@@ -572,13 +565,6 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
                 List<ScheduleItemSnapshot> manualItems = manualEventsByDate.get(dateStr);
                 if (manualItems != null) {
                     merged.addAll(manualItems);
-                }
-
-                int dayOfWeek = toPlannerDayOfWeek(date);
-                for (AutoPlanSnapshot autoPlan : autoPlans) {
-                    if (autoPlan.matches(dateStr, dayOfWeek)) {
-                        merged.add(autoPlan.asScheduleItem());
-                    }
                 }
 
                 Collections.sort(merged, new Comparator<ScheduleItemSnapshot>() {
@@ -609,7 +595,6 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
                 String raw = PlannerWidgetStore.getPrefs(context).getString(PlannerWidgetStore.KEY_SUMMARY_SNAPSHOT, "{}");
                 JSONObject json = new JSONObject(raw);
                 JSONObject manualEventsByDateJson = json.optJSONObject("manualEventsByDate");
-                JSONArray autoPlansJson = json.optJSONArray("autoPlans");
 
                 HashMap<String, List<ScheduleItemSnapshot>> manualEventsByDate = new HashMap<>();
                 if (manualEventsByDateJson != null) {
@@ -632,16 +617,6 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
                     }
                 }
 
-                ArrayList<AutoPlanSnapshot> autoPlans = new ArrayList<>();
-                if (autoPlansJson != null) {
-                    for (int index = 0; index < autoPlansJson.length(); index++) {
-                        AutoPlanSnapshot autoPlan = AutoPlanSnapshot.from(autoPlansJson.optJSONObject(index));
-                        if (autoPlan != null) {
-                            autoPlans.add(autoPlan);
-                        }
-                    }
-                }
-
                 int parsedStart = json.optInt("viewportStartMinute", FALLBACK_START_MINUTE);
                 int parsedEnd = json.optInt("viewportEndMinute", FALLBACK_END_MINUTE);
                 if (parsedEnd <= parsedStart) {
@@ -654,8 +629,7 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
                     0, // Always 0 from JS fallback
                     FALLBACK_START_MINUTE,
                     FALLBACK_END_MINUTE,
-                    manualEventsByDate,
-                    autoPlans
+                    manualEventsByDate
                 );
             } catch (Exception ignored) {
                 return new SharedPreferencesSnapshot(
@@ -663,8 +637,7 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
                     0,
                     FALLBACK_START_MINUTE,
                     FALLBACK_END_MINUTE,
-                    new HashMap<String, List<ScheduleItemSnapshot>>(),
-                    new ArrayList<AutoPlanSnapshot>()
+                    new HashMap<String, List<ScheduleItemSnapshot>>()
                 );
             }
         }
@@ -714,63 +687,4 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
         }
     }
 
-    private static class AutoPlanSnapshot {
-        final String title;
-        final int startMinute;
-        final int endMinute;
-        final String dateType;
-        final String start;
-        final String end;
-        final List<Integer> days;
-
-        AutoPlanSnapshot(String title, int startMinute, int endMinute, String dateType, String start, String end, List<Integer> days) {
-            this.title = title;
-            this.startMinute = startMinute;
-            this.endMinute = endMinute;
-            this.dateType = dateType;
-            this.start = start;
-            this.end = end;
-            this.days = days;
-        }
-
-        boolean matches(String dateStr, int dayOfWeek) {
-            if ("recurring".equals(dateType)) {
-                return days.contains(dayOfWeek);
-            }
-            if (!TextUtils.isEmpty(start) && !TextUtils.isEmpty(end)) {
-                return dateStr.compareTo(start) >= 0 && dateStr.compareTo(end) <= 0;
-            }
-            return false;
-        }
-
-        ScheduleItemSnapshot asScheduleItem() {
-            return new ScheduleItemSnapshot(title, startMinute, endMinute, "auto", "recurring".equals(dateType));
-        }
-
-        static AutoPlanSnapshot from(JSONObject json) {
-            if (json == null) return null;
-
-            int startMinute = json.optInt("startMinute", -1);
-            int endMinute = json.optInt("endMinute", -1);
-            if (startMinute < 0 || endMinute <= startMinute) return null;
-
-            JSONArray daysJson = json.optJSONArray("days");
-            ArrayList<Integer> days = new ArrayList<>();
-            if (daysJson != null) {
-                for (int index = 0; index < daysJson.length(); index++) {
-                    days.add(daysJson.optInt(index, -1));
-                }
-            }
-
-            return new AutoPlanSnapshot(
-                json.optString("title", "Untitled"),
-                startMinute,
-                endMinute,
-                json.optString("dateType", "range"),
-                json.optString("start", ""),
-                json.optString("end", ""),
-                days
-            );
-        }
-    }
 }
