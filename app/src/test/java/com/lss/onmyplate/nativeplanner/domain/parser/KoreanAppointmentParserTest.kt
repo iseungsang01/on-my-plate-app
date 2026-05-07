@@ -1,6 +1,7 @@
 package com.lss.onmyplate.nativeplanner.domain.parser
 
 import com.lss.onmyplate.nativeplanner.domain.model.TimeConfidence
+import com.lss.onmyplate.nativeplanner.domain.model.AppointmentParseResult
 import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlinx.coroutines.runBlocking
@@ -49,12 +50,49 @@ class KoreanAppointmentParserTest {
     }
 
     @Test
-    fun keepsFallbackTitleWhenDateAndTimeAreMissing() = runBlocking {
+    fun doesNotParseAppointmentTitle() = runBlocking {
         val result = parser.parse("팀 회의", receivedAt)
 
-        assertEquals("팀 회의", result.title)
+        assertEquals("", result.title)
         assertNull(result.startAt)
         assertEquals(TimeConfidence.Low, result.timeConfidence)
+    }
+
+    @Test
+    fun preferLlmUsesLlmResultForShareTextEvenWhenLocalParserSucceeds() = runBlocking {
+        val llmStartAt = epochMillis(2026, 5, 8, 20, 0)
+        val llmParser = AppointmentLlmParser { _, _ ->
+            AppointmentParseResult(
+                title = "LLM dinner",
+                startAt = llmStartAt,
+                endAt = null,
+                location = "LLM place",
+                confidence = 0.92f,
+                timeConfidence = TimeConfidence.High,
+            )
+        }
+        val parser = KoreanAppointmentParser(zoneId = zoneId, llmParser = llmParser, preferLlm = true)
+
+        val result = parser.parse("내일 저녁 7시 강남에서 약속", receivedAt)
+
+        assertEquals("", result.title)
+        assertEquals(llmStartAt, result.startAt)
+        assertEquals("LLM place", result.location)
+        assertEquals(1.0f, result.confidence)
+    }
+
+    @Test
+    fun preferLlmFallsBackToLocalParserWhenLlmReturnsNull() = runBlocking {
+        val parser = KoreanAppointmentParser(
+            zoneId = zoneId,
+            llmParser = AppointmentLlmParser { _, _ -> null },
+            preferLlm = true,
+        )
+
+        val result = parser.parse("내일 오후 2시 카페에서 만나", receivedAt)
+
+        assertEquals(epochMillis(2026, 5, 8, 14, 0), result.startAt)
+        assertEquals("카페", result.location)
     }
 
     private fun epochMillis(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =

@@ -12,7 +12,8 @@ import java.time.temporal.TemporalAdjusters
 
 class KoreanAppointmentParser(
     private val zoneId: ZoneId = ZoneId.of("Asia/Seoul"),
-    private val llmParser: GeminiAppointmentParser? = null,
+    private val llmParser: AppointmentLlmParser? = null,
+    private val preferLlm: Boolean = false,
 ) {
     private val weekdayMap = mapOf(
         "월요일" to DayOfWeek.MONDAY,
@@ -33,6 +34,9 @@ class KoreanAppointmentParser(
 
     suspend fun parse(rawText: String, receivedAt: Long): AppointmentParseResult {
         val local = parseLocally(rawText, receivedAt)
+        if (preferLlm) {
+            return llmParser?.parse(rawText, receivedAt)?.mergeFallback(local) ?: local
+        }
         if (local.startAt != null && local.confidence >= 0.67f) return local
         return llmParser?.parse(rawText, receivedAt)?.mergeFallback(local) ?: local
     }
@@ -49,7 +53,7 @@ class KoreanAppointmentParser(
         }
         val confidence = listOfNotNull(date, timeParse.time, location).size / 3f
         return AppointmentParseResult(
-            title = parseTitle(rawText),
+            title = "",
             startAt = startAt,
             endAt = null,
             location = location,
@@ -60,7 +64,7 @@ class KoreanAppointmentParser(
 
     private fun AppointmentParseResult.mergeFallback(fallback: AppointmentParseResult): AppointmentParseResult =
         copy(
-            title = title.ifBlank { fallback.title },
+            title = "",
             startAt = startAt ?: fallback.startAt,
             endAt = endAt ?: fallback.endAt,
             location = location ?: fallback.location,
@@ -160,19 +164,6 @@ class KoreanAppointmentParser(
             ?.trim()
             ?.takeIf { it.isNotBlank() }
             ?.take(40)
-    }
-
-    private fun parseTitle(text: String): String {
-        val firstLine = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
-        return firstLine
-            .replace(Regex("(오늘|내일|모레|이번 주|다음 주|담주|\\d{1,2}월\\s*\\d{1,2}일)"), "")
-            .replace(Regex(weekdayMap.keys.joinToString("|") { Regex.escape(it) }), "")
-            .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}[:：]\\d{2}"), "")
-            .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}시(?:\\s*\\d{1,2}분|\\s*반)?"), "")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .ifBlank { "약속" }
-            .take(60)
     }
 
     private data class TimeParse(val time: LocalTime?, val confidence: TimeConfidence)

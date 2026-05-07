@@ -21,6 +21,7 @@ fun ConflictScreen(
     val scope = rememberCoroutineScope()
     var conflicts by remember { mutableStateOf<List<ScheduleEntity>>(emptyList()) }
     val candidate by repository.observeCandidate(candidateId).collectAsState(initial = null)
+    val hasTitle = candidate?.extractedTitle?.isNotBlank() == true
 
     LaunchedEffect(candidateId) {
         conflicts = when (val attempt = repository.conflictsForCandidate(candidateId)) {
@@ -31,7 +32,7 @@ fun ConflictScreen(
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("일정이 겹칩니다", style = MaterialTheme.typography.headlineMedium)
-        Text("새 후보: ${candidate?.extractedTitle.orEmpty()}")
+        Text("새 후보: ${candidate?.extractedTitle?.takeIf { it.isNotBlank() } ?: "제목 입력 필요"}")
         Text("${formatDateTime(candidate?.extractedStartAt)} ${candidate?.extractedLocation.orEmpty()}")
         Text("겹치는 일정", style = MaterialTheme.typography.titleMedium)
         conflicts.forEach {
@@ -48,7 +49,7 @@ fun ConflictScreen(
                     repository.saveFromCandidate(candidateId, ScheduleStatus.Confirmed, candidate?.extractedTitle, force = true)
                     onDone()
                 }
-            }) { Text("그래도 추가") }
+            }, enabled = hasTitle) { Text("그래도 추가") }
             OutlinedButton(onClick = onEdit) { Text("수정하기") }
             OutlinedButton(onClick = {
                 scope.launch {

@@ -16,8 +16,8 @@ class GeminiAppointmentParser(
     private val model: String,
     private val baseUrl: String,
     private val zoneId: ZoneId = ZoneId.of("Asia/Seoul"),
-) {
-    suspend fun parse(rawText: String, receivedAt: Long): AppointmentParseResult? {
+) : AppointmentLlmParser {
+    override suspend fun parse(rawText: String, receivedAt: Long): AppointmentParseResult? {
         if (apiKey.isBlank()) return null
         return runCatching {
             withContext(Dispatchers.IO) {
@@ -68,12 +68,14 @@ class GeminiAppointmentParser(
             You extract one calendar appointment from Korean shared text.
             Current received time is $received in Asia/Seoul. Resolve relative dates from it.
             Return only JSON with this shape:
-            {"title":"string","start_at_epoch_millis":number|null,"end_at_epoch_millis":number|null,"location":"string|null","confidence":0.0}
+            {"start_at_epoch_millis":number|null,"end_at_epoch_millis":number|null,"location":"string|null","confidence":0.0}
             Rules:
             - If month/day has no year, choose the next upcoming date from the received time.
             - For Korean evening/저녁, use PM. Example 저녁 7시 = 19:00.
-            - Keep title short and human readable.
+            - If an end time is not explicit, set end_at_epoch_millis to null.
+            - Do not extract or invent an appointment title. The user will type the title manually.
             - Do not invent location if absent.
+            - Use confidence 0.0 to 1.0 based on how explicit the appointment details are.
 
             Text:
             $rawText
@@ -98,7 +100,7 @@ class GeminiAppointmentParser(
         val json = JSONObject(text)
         val startAt = json.optNullableLong("start_at_epoch_millis")
         return AppointmentParseResult(
-            title = json.optString("title").takeIf { it.isNotBlank() } ?: "약속",
+            title = "",
             startAt = startAt,
             endAt = json.optNullableLong("end_at_epoch_millis"),
             location = json.optString("location").takeIf { it.isNotBlank() && it != "null" },

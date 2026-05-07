@@ -51,8 +51,28 @@ class PlannerRepositoryTest {
         assertNotNull(stored)
         assertEquals("team sync", stored?.rawText)
         assertEquals("com.example.chat", stored?.sourceApp)
+        assertEquals("", stored?.extractedTitle)
         assertEquals(CandidateStatus.Pending.dbValue, stored?.status)
         assertEquals(receivedAt, stored?.createdAt)
+    }
+
+    @Test
+    fun saveFromCandidateRequiresUserTitle() = runBlocking {
+        val candidate = repository.createCandidate(
+            rawText = "내일 오후 2시 카페",
+            sourceApp = "com.example.chat",
+            receivedAt = 1_779_292_800_000L,
+        )
+
+        val result = repository.saveFromCandidate(
+            candidateId = candidate.id,
+            selectedStatus = ScheduleStatus.Confirmed,
+            titleOverride = null,
+        )
+
+        assertEquals(SaveResult.TitleRequired, result)
+        assertEquals(0, db.scheduleDao().getAll().size)
+        assertEquals(CandidateStatus.Pending.dbValue, db.appointmentCandidateDao().get(candidate.id)?.status)
     }
 
     @Test

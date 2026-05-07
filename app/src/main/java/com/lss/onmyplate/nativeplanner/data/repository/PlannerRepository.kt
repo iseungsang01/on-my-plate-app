@@ -48,7 +48,7 @@ class PlannerRepository(
         val endAt = ConflictDetector.newEnd(startAt, candidate.extractedEndAt)
         val conflicts = schedules.findConflicts(startAt, endAt)
         return if (conflicts.isEmpty()) {
-            SaveAttempt.Ready(candidate, titleOverride?.takeIf { it.isNotBlank() } ?: candidate.extractedTitle)
+            SaveAttempt.Ready(candidate, titleOverride?.trim()?.takeIf { it.isNotBlank() } ?: candidate.extractedTitle)
         } else {
             SaveAttempt.Conflict(candidate, conflicts)
         }
@@ -64,22 +64,30 @@ class PlannerRepository(
         if (candidate.status != CandidateStatus.Pending.dbValue) {
             return@withTransaction SaveResult.AlreadyHandled
         }
+        val title = titleOverride?.trim()?.takeIf { it.isNotBlank() }
+            ?: candidate.extractedTitle.takeIf { it.isNotBlank() }
+            ?: return@withTransaction SaveResult.TitleRequired
+        val titledCandidate = if (candidate.extractedTitle == title) {
+            candidate
+        } else {
+            candidate.copy(extractedTitle = title).also { candidates.update(it) }
+        }
 
-        if (selectedStatus == ScheduleStatus.Uncertain || candidate.extractedStartAt == null) {
-            insertSchedule(candidate, selectedStatus, titleOverride, forceStartAt = candidate.createdAt)
-            candidates.update(candidate.copy(status = CandidateStatus.Confirmed.dbValue))
+        if (selectedStatus == ScheduleStatus.Uncertain || titledCandidate.extractedStartAt == null) {
+            insertSchedule(titledCandidate, selectedStatus, title, forceStartAt = titledCandidate.createdAt)
+            candidates.update(titledCandidate.copy(status = CandidateStatus.Confirmed.dbValue))
             return@withTransaction SaveResult.SavedAsUncertain
         }
 
-        val startAt = candidate.extractedStartAt
-        val endAt = ConflictDetector.newEnd(startAt, candidate.extractedEndAt)
+        val startAt = titledCandidate.extractedStartAt
+        val endAt = ConflictDetector.newEnd(startAt, titledCandidate.extractedEndAt)
         val conflicts = schedules.findConflicts(startAt, endAt)
         if (conflicts.isNotEmpty() && !force) {
-            return@withTransaction SaveResult.Conflict(candidate, conflicts)
+            return@withTransaction SaveResult.Conflict(titledCandidate, conflicts)
         }
 
-        insertSchedule(candidate, selectedStatus, titleOverride)
-        candidates.update(candidate.copy(status = CandidateStatus.Confirmed.dbValue))
+        insertSchedule(titledCandidate, selectedStatus, title)
+        candidates.update(titledCandidate.copy(status = CandidateStatus.Confirmed.dbValue))
         SaveResult.Saved
     }
 
@@ -93,7 +101,7 @@ class PlannerRepository(
         val candidate = candidates.get(candidateId) ?: return
         candidates.update(
             candidate.copy(
-                extractedTitle = title.ifBlank { "새 약속" },
+                extractedTitle = title.trim(),
                 extractedStartAt = startAt,
                 extractedEndAt = endAt,
                 extractedLocation = location?.ifBlank { null },
@@ -151,5 +159,6 @@ sealed interface SaveResult {
     data object SavedAsUncertain : SaveResult
     data object AlreadyHandled : SaveResult
     data object MissingCandidate : SaveResult
+    data object TitleRequired : SaveResult
     data class Conflict(val candidate: AppointmentCandidateEntity, val conflicts: List<ScheduleEntity>) : SaveResult
 }

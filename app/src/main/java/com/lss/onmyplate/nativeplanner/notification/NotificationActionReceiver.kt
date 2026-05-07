@@ -48,6 +48,10 @@ class NotificationActionReceiver : BroadcastReceiver() {
             else -> ScheduleStatus.Uncertain
         }
         return when (val result = app.repository.saveFromCandidate(candidateId, status, title)) {
+            SaveResult.TitleRequired -> {
+                app.repository.getCandidate(candidateId)?.let { app.notifications.showCandidate(it) }
+                true
+            }
             is SaveResult.Conflict -> {
                 app.notifications.showConflict(result.candidate, result.conflicts.first())
                 true

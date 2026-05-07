@@ -22,6 +22,7 @@ class OnMyPlateApp : Application() {
                 model = BuildConfig.GEMINI_MODEL,
                 baseUrl = BuildConfig.GEMINI_API_BASE_URL,
             ),
+            preferLlm = true,
         )
     }
     val repository by lazy { PlannerRepository(database, parser) }

@@ -2,6 +2,29 @@
 
 Native Android Kotlin MVP for shared-text appointment ingestion.
 
+## Product Logic
+
+The app turns shared text into a schedule candidate, but it does not decide the appointment title.
+
+1. The user shares `text/plain` content from KakaoTalk, SMS, a memo app, a browser, or any Android share source into the app.
+2. `ShareReceiverActivity` receives the text and asks for notification permission when needed.
+3. `PlannerRepository.createCandidate` parses the shared text into appointment metadata:
+   - start time
+   - optional end time
+   - optional location
+   - confidence/time-confidence values
+4. The parser intentionally leaves the appointment title blank. The title must be typed by the user.
+5. `AppointmentNotificationManager.showCandidate` posts a native notification showing the parsed time/location and asking for the title.
+6. From the notification the user can:
+   - type a title and save as confirmed
+   - type a title and save as uncertain
+   - open the app to edit title, time, end time, and location before saving
+7. `PlannerRepository.saveFromCandidate` refuses to create a schedule if the title is still blank.
+8. If the candidate overlaps an existing schedule, the app shows a conflict notification/screen before saving unless the user explicitly forces the add.
+9. Saved schedules are stored locally in Room and synced into the native home-screen widget snapshot.
+
+See `SPECIFICATION.md` for the file-level implementation map.
+
 ## Run
 
 Open this folder in Android Studio, let Gradle sync, then run the `app` configuration on a device or emulator.
@@ -20,17 +43,18 @@ On Unix-like shells:
 ./gradlew :app:assembleDebug
 ```
 
-The app registers an Android `ACTION_SEND` target for `text/plain`. Share text from KakaoTalk, SMS, memo apps, browsers, or any Android app into `On My Plate Planner`; the share receiver parses the text, creates an appointment candidate, and shows a native notification with inline title input and actions.
+The app registers an Android `ACTION_SEND` target for `text/plain`. Share text from KakaoTalk, SMS, memo apps, browsers, or any Android app into `On My Plate Planner`; the share receiver parses time/location details, creates an appointment candidate with an empty title, and shows a native notification with inline title input and actions.
 
 ## MVP Scope
 
 - Native Android Kotlin, Jetpack Compose, Room, coroutines.
-- Korean rule-based parser for date/time/location/title extraction.
-- Notification actions with `RemoteInput`: `확정`, `예정`, `미정`.
+- Korean rule-based parser plus optional Gemini LLM parsing for shared text metadata.
+- Appointment title is user-entered text, not parsed from the shared text.
+- Notification actions with `RemoteInput`: `확정 저장`, `미정 저장`, `세부 수정`.
 - Local conflict detection using Room schedules.
 - Candidate edit and conflict resolution screens.
 
-No KakaoTalk scraping, login, background chat monitoring, web app, cloud sync, or LLM API is included.
+No KakaoTalk scraping, login, background chat monitoring, web app, or cloud sync is included.
 
 ## Native widget snapshot scope
 

@@ -23,7 +23,7 @@ fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Un
         if (pending.isNotEmpty()) {
             Text("미정 후보", style = MaterialTheme.typography.titleMedium)
             pending.forEach {
-                AssistChip(onClick = { onOpenCandidate(it.id) }, label = { Text(it.extractedTitle) })
+                AssistChip(onClick = { onOpenCandidate(it.id) }, label = { Text(it.extractedTitle.ifBlank { "제목 입력 필요" }) })
             }
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {

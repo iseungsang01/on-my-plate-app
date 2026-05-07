@@ -26,6 +26,7 @@ fun CandidateEditScreen(
     var endAt by remember(candidate?.id) { mutableStateOf(formatDateTime(candidate?.extractedEndAt)) }
     var location by remember(candidate?.id) { mutableStateOf(candidate?.extractedLocation.orEmpty()) }
     var status by remember { mutableStateOf(ScheduleStatus.Confirmed) }
+    val canSave = title.isNotBlank()
 
     if (candidate == null) {
         Box(Modifier.fillMaxSize().padding(16.dp)) { Text("후보를 찾을 수 없습니다") }
@@ -55,6 +56,7 @@ fun CandidateEditScreen(
                 }
             },
             modifier = Modifier.fillMaxWidth(),
+            enabled = canSave,
         ) { Text("저장") }
     }
 }
