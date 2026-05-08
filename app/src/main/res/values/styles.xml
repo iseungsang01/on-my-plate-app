@@ -2,7 +2,7 @@
     <style name="Theme.OnMyPlate" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">#FAFAFA</item>
+        <item name="android:statusBarColor">#F9FAFB</item>
     </style>
 
     <style name="Theme.OnMyPlate.Transparent" parent="Theme.OnMyPlate">

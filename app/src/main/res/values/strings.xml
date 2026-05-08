@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">On My Plate Planner</string>
+    <string name="app_name">약속 바구니</string>
     <string name="summary_widget_description">Weekly timetable snapshot</string>
     <string name="summary_widget_prev_week">&lt;</string>
     <string name="summary_widget_next_week">&gt;</string>

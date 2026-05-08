@@ -34,7 +34,7 @@ fun CandidateEditScreen(
     }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("약속 후보 수정", style = MaterialTheme.typography.headlineMedium)
@@ -44,7 +44,17 @@ fun CandidateEditScreen(
         OutlinedTextField(location, { location = it }, label = { Text("장소") }, modifier = Modifier.fillMaxWidth())
         StatusSelector(status = status, onStatus = { status = it })
         Text("원문", style = MaterialTheme.typography.titleMedium)
-        Text(candidate!!.rawText, style = MaterialTheme.typography.bodyMedium)
+        Card(
+            Modifier.fillMaxWidth(),
+            colors = FeedLoopCardColors(),
+            elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
+        ) {
+            Text(
+                candidate!!.rawText,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(14.dp),
+            )
+        }
         Button(
             onClick = {
                 scope.launch {

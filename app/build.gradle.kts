@@ -5,6 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.kapt")
     id("com.github.triplet.play")
+    alias(libs.plugins.kotlin.compose)
 }
 
 fun envOrDotenv(name: String): String? {
@@ -142,6 +143,10 @@ kapt {
 }
 
 dependencies {
+    implementation(libs.androidx.compose.ui.graphics)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
     implementation(composeBom)
     androidTestImplementation(composeBom)
@@ -160,6 +165,7 @@ dependencies {
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
     kapt("androidx.room:room-compiler:2.6.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")

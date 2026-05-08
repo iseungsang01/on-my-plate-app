@@ -30,13 +30,20 @@ fun ConflictScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         Text("일정이 겹칩니다", style = MaterialTheme.typography.headlineMedium)
         Text("새 후보: ${candidate?.extractedTitle?.takeIf { it.isNotBlank() } ?: "제목 입력 필요"}")
         Text("${formatDateTime(candidate?.extractedStartAt)} ${candidate?.extractedLocation.orEmpty()}")
         Text("겹치는 일정", style = MaterialTheme.typography.titleMedium)
         conflicts.forEach {
-            Card(Modifier.fillMaxWidth()) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = FeedLoopCardColors(),
+                elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
+            ) {
                 Column(Modifier.padding(12.dp)) {
                     Text(it.title, style = MaterialTheme.typography.titleMedium)
                     Text("${formatDateTime(it.startAt)} - ${formatDateTime(it.endAt)}")

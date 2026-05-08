@@ -35,8 +35,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         routeState.value = startRoute(intent)
         setContent {
-            MaterialTheme {
-                Surface {
+            MaterialTheme(colorScheme = FeedLoopColorScheme) {
+                Surface(color = MaterialTheme.colorScheme.background) {
                     val route by routeState
                     AppRoot(
                         route = route,

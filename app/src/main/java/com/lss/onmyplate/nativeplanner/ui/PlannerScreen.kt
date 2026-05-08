@@ -7,7 +7,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
@@ -20,9 +19,16 @@ fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Un
     val scope = rememberCoroutineScope()
     var directInput by remember { mutableStateOf("") }
     var isCreatingCandidate by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("Planner", style = MaterialTheme.typography.headlineMedium)
-        Card(Modifier.fillMaxWidth()) {
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("약속 바구니", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onBackground)
+        Card(
+            Modifier.fillMaxWidth(),
+            colors = FeedLoopCardColors(),
+            elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
+        ) {
             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("직접 입력", style = MaterialTheme.typography.titleMedium)
                 OutlinedTextField(
@@ -66,9 +72,9 @@ fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Un
                 AssistChip(onClick = { onOpenCandidate(it.id) }, label = { Text(it.extractedTitle.ifBlank { "제목 입력 필요" }) })
             }
         }
-        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             schedules.groupBy { formatDay(it.startAt) }.forEach { (day, dayItems) ->
-                item { Text(day, style = MaterialTheme.typography.titleMedium) }
+                item { Text(day, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground) }
                 items(dayItems, key = { it.id }) { ScheduleRow(it) }
             }
         }
@@ -78,13 +84,17 @@ fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Un
 @Composable
 private fun ScheduleRow(schedule: ScheduleEntity) {
     val color = when (schedule.status) {
-        "confirmed" -> Color(0xFF1B7F46)
-        "planned" -> Color(0xFF8A6D00)
-        else -> Color(0xFF757575)
+        "confirmed" -> FeedLoopColors.Success
+        "planned" -> FeedLoopColors.Warning
+        else -> FeedLoopColors.Secondary
     }
-    Card(Modifier.fillMaxWidth()) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = FeedLoopCardColors(),
+        elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
+    ) {
         Row(
-            Modifier.fillMaxWidth().padding(14.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -92,7 +102,7 @@ private fun ScheduleRow(schedule: ScheduleEntity) {
             Column(Modifier.weight(1f)) {
                 Text(schedule.title, style = MaterialTheme.typography.titleMedium)
                 val meta = listOfNotNull(schedule.location, schedule.status).joinToString(" · ")
-                Text(meta, style = MaterialTheme.typography.bodySmall, color = Color(0xFF616161))
+                Text(meta, style = MaterialTheme.typography.bodySmall, color = FeedLoopColors.Secondary)
             }
         }
     }
