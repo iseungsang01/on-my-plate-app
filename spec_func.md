@@ -1,0 +1,550 @@
+﻿# On My Plate Native Planner 함수별 명세
+
+이 문서는 `SPECIFICATION.md`와 현재 `app/src/main/java/com/lss/onmyplate/nativeplanner` 구현을 기준으로, 주요 함수/메서드가 맡는 기능을 파일별로 정리한 문서입니다.
+
+## 핵심 처리 흐름 요약
+
+1. `ShareReceiverActivity.onCreate` 또는 `PlannerScreen`의 직접 입력에서 공유/입력 텍스트를 받습니다.
+2. `PlannerRepository.createCandidate`가 `KoreanAppointmentParser.parse`로 일정 후보를 파싱하고 Room에 저장합니다.
+3. `AppointmentNotificationManager.showCandidate` 또는 `CandidateEditScreen`이 사용자에게 제목 입력을 요구합니다.
+4. `PlannerRepository.saveFromCandidate`가 제목 필수 조건, 미정 저장, 충돌 확인, 강제 저장을 처리합니다.
+5. 저장된 `ScheduleEntity`는 `OnMyPlateApp.onCreate`의 observe 루프를 통해 `PlannerWidgetSync.saveSnapshot`으로 위젯 snapshot에 반영됩니다.
+
+---
+
+## App Root
+
+### `OnMyPlateApp.kt`
+
+- `onCreate()`
+  - 애플리케이션 시작 시 전역 인스턴스를 설정합니다.
+  - 알림 채널을 생성합니다.
+  - 저장된 일정 목록을 관찰하다가 변경될 때마다 `PlannerWidgetSync.saveSnapshot`을 호출해 홈 위젯 데이터를 갱신합니다.
+
+---
+
+## 공유 입력
+
+### `share/ShareReceiverActivity.kt`
+
+- `onCreate(savedInstanceState)`
+  - Android 공유 intent가 `ACTION_SEND`이고 MIME type이 `text/plain`인지 검증합니다.
+  - 공유 텍스트, 공유한 앱 패키지, 수신 시각을 임시 보관합니다.
+  - Android 13 이상에서 알림 권한이 없으면 권한을 요청하고, 권한이 있으면 `saveAndNotify()`를 실행합니다.
+
+- `onRequestPermissionsResult(requestCode, permissions, grantResults)`
+  - 알림 권한 요청 결과가 돌아오면 결과와 무관하게 보관된 공유 텍스트 저장을 계속 진행합니다.
+
+- `saveAndNotify()`
+  - 보관된 공유 텍스트로 `PlannerRepository.createCandidate`를 호출해 후보를 생성합니다.
+  - 생성된 후보에 대해 `AppointmentNotificationManager.showCandidate`로 제목 입력 알림을 띄웁니다.
+  - 투명 공유 수신 Activity를 종료합니다.
+
+- `needsNotificationPermission()`
+  - Android 13 이상인지, `POST_NOTIFICATIONS` 권한이 없는지 확인합니다.
+
+---
+
+## 파싱
+
+### `domain/parser/AppointmentLlmParser.kt`
+
+- `parse(rawText, receivedAt)`
+  - LLM 기반 일정 파서의 공통 인터페이스입니다.
+  - 성공 시 `AppointmentParseResult`, 파싱 불가/실패 시 `null`을 반환하여 로컬 파서 fallback을 허용합니다.
+
+### `domain/parser/KoreanAppointmentParser.kt`
+
+- `parse(rawText, receivedAt)`
+  - 로컬 파싱 결과를 먼저 만들고, 설정에 따라 LLM 결과를 우선하거나 보조 fallback으로 병합합니다.
+  - `preferLlm=true`이면 LLM 결과를 우선 사용하되 누락 필드는 로컬 결과로 채웁니다.
+  - 로컬 결과의 시작 시각과 신뢰도가 충분하면 LLM 없이 로컬 결과를 반환할 수 있습니다.
+
+- `parseLocally(rawText, receivedAt)`
+  - 수신 시각을 기준일로 변환합니다.
+  - `parseDate`, `parseTime`, `parseLocation`을 호출해 날짜/시간/장소를 추출합니다.
+  - 날짜와 시간이 모두 있으면 epoch milliseconds `startAt`을 생성합니다.
+  - 제목은 항상 빈 문자열로 유지합니다.
+
+- `mergeFallback(fallback)`
+  - LLM 결과의 `startAt`, `endAt`, `location`이 없으면 로컬 fallback 값을 채웁니다.
+  - 제목은 자동 추출하지 않도록 항상 빈 문자열로 고정합니다.
+  - confidence는 두 결과 중 더 높은 값을 사용합니다.
+
+- `parseDate(text, baseDate)`
+  - “오늘/내일/모레”, 월/일 표현, 이번 주/다음 주 요일 표현을 기준일에 맞춰 `LocalDate`로 변환합니다.
+  - 연도가 없는 월/일이 이미 지난 날짜면 다음 해로 보정합니다.
+
+- `parseTime(text)`
+  - 오전/오후/저녁/밤, `HH:mm`, 한국어 시/분/반 표현을 `LocalTime`으로 변환합니다.
+  - 명확한 시간은 `High`, 애매한 숫자 시간은 `Medium`, 시간대 단어만 있는 경우는 `Low` 신뢰도로 반환합니다.
+
+- `parseLocation(text)`
+  - `장소`/`위치` 같은 명시적 라벨과 “~에서”, “회의/미팅/약속” 주변 표현을 기준으로 장소 후보를 추출합니다.
+  - 추출된 장소는 공백 제거 후 최대 길이를 제한합니다.
+
+### `domain/parser/GeminiAppointmentParser.kt`
+
+- `parse(rawText, receivedAt)`
+  - Gemini API key가 비어 있으면 즉시 `null`을 반환합니다.
+  - IO dispatcher에서 `post`와 `parseResponse`를 실행합니다.
+  - 네트워크/API/JSON 오류가 발생하면 예외를 밖으로 던지지 않고 `null`로 처리합니다.
+
+- `post(rawText, receivedAt)`
+  - Gemini `generateContent` endpoint로 HTTP POST 요청을 보냅니다.
+  - temperature 0, JSON 응답 MIME 설정을 포함합니다.
+  - 2xx가 아닌 응답이면 오류를 발생시킵니다.
+
+- `prompt(rawText, receivedAt)`
+  - Gemini에게 한 개의 일정에서 시작/종료 시각, 장소, confidence만 JSON으로 추출하라고 지시합니다.
+  - 제목은 만들거나 추출하지 말라고 명시합니다.
+  - 상대 날짜는 `Asia/Seoul` 수신 시각 기준으로 해석하게 합니다.
+
+- `parseResponse(responseText)`
+  - Gemini 응답의 `candidates[0].content.parts[0].text`를 꺼내 JSON 코드블록 마커를 제거합니다.
+  - `start_at_epoch_millis`, `end_at_epoch_millis`, `location`, `confidence`를 `AppointmentParseResult`로 변환합니다.
+  - 시작 시간이 있으면 시간 신뢰도는 `High`, 없으면 `Low`로 둡니다.
+
+- `JSONObject.optNullableLong(name)`
+  - JSON 필드가 없거나 null이면 Kotlin `null`, 있으면 long 값을 반환하는 helper입니다.
+
+---
+
+## 도메인 모델 및 충돌
+
+### `domain/model/Models.kt`
+
+- `ScheduleStatus`
+  - 저장 일정 상태를 `confirmed`, `planned`, `uncertain` DB 값으로 표현합니다.
+
+- `CandidateStatus`
+  - 후보 상태를 `pending`, `confirmed`, `discarded` DB 값으로 표현합니다.
+
+- `TimeConfidence`
+  - 시간 파싱 신뢰도를 `high`, `medium`, `low` DB 값으로 표현합니다.
+
+- `AppointmentParseResult`
+  - 로컬/LLM 파서가 공유하는 출력 모델입니다. 제목, 시작/종료 시각, 장소, confidence, 시간 신뢰도를 담습니다.
+
+### `domain/conflict/ConflictDetector.kt`
+
+- `newEnd(startAt, endAt)`
+  - 종료 시각이 있으면 그대로 사용하고, 없으면 시작 시각 + 기본 1시간을 종료 시각으로 간주합니다.
+
+- `conflicts(newStart, newEnd, existing)`
+  - 새 일정 구간과 기존 일정 구간이 겹치는지 검사합니다.
+  - 기존 일정의 종료 시각이 없으면 기본 1시간 길이를 적용합니다.
+
+---
+
+## Room 데이터베이스/DAO
+
+### `data/db/AppDatabase.kt`
+
+- `scheduleDao()`
+  - `ScheduleDao` 인스턴스를 제공합니다.
+
+- `appointmentCandidateDao()`
+  - `AppointmentCandidateDao` 인스턴스를 제공합니다.
+
+- `MIGRATION_1_2.migrate(db)`
+  - `appointment_candidates` 테이블에 `sourceApp` 컬럼이 없으면 추가합니다.
+
+- `create(context)`
+  - `on_my_plate_native.db` Room database를 생성하고 migration을 연결합니다.
+
+- `SupportSQLiteDatabase.hasColumn(tableName, columnName)`
+  - `PRAGMA table_info`로 특정 테이블에 컬럼이 존재하는지 확인합니다.
+
+### `data/dao/AppointmentCandidateDao.kt`
+
+- `get(id)`
+  - 후보 ID로 후보 1건을 조회합니다.
+
+- `observe(id)`
+  - 후보 ID로 후보 1건을 `Flow`로 관찰합니다.
+
+- `observePending()`
+  - `pending` 상태 후보 목록을 최신 생성 순으로 관찰합니다.
+
+- `insert(candidate)`
+  - 후보를 삽입합니다. 같은 primary key가 있으면 abort합니다.
+
+- `update(candidate)`
+  - 후보의 파싱/수정/상태 값을 갱신합니다.
+
+### `data/dao/ScheduleDao.kt`
+
+- `observeAll()`
+  - 모든 저장 일정을 시작 시각 오름차순 `Flow`로 제공합니다.
+
+- `getAll()`
+  - 모든 저장 일정을 시작 시각 오름차순으로 한 번 조회합니다.
+
+- `findConflicts(newStart, newEnd)`
+  - SQL 구간 겹침 조건으로 새 일정과 충돌하는 기존 일정을 조회합니다.
+  - 종료 시각이 없는 기존 일정은 SQL에서 기본 1시간을 적용합니다.
+
+- `insert(schedule)`
+  - 최종 일정을 삽입합니다. 같은 primary key가 있으면 abort합니다.
+
+- `update(schedule)`
+  - 저장된 일정 정보를 갱신합니다.
+
+---
+
+## Repository
+
+### `data/repository/PlannerRepository.kt`
+
+- `observeSchedules()`
+  - UI와 위젯 동기화가 사용할 저장 일정 목록 `Flow`를 반환합니다.
+
+- `observePendingCandidates()`
+  - 플래너 화면에 표시할 미처리 후보 목록 `Flow`를 반환합니다.
+
+- `observeCandidate(id)`
+  - 후보 편집/충돌 화면에서 사용할 후보 1건 `Flow`를 반환합니다.
+
+- `getCandidate(id)`
+  - 알림 처리 등 suspend 문맥에서 후보 1건을 직접 조회합니다.
+
+- `createCandidate(rawText, sourceApp, receivedAt)`
+  - 공유/직접 입력 텍스트를 파싱합니다.
+  - 파싱 결과로 `AppointmentCandidateEntity`를 만들되 제목은 빈 값으로 둡니다.
+  - `sourceApp`은 blank면 null로 저장합니다.
+  - 후보 상태는 `pending`으로 저장합니다.
+
+- `conflictsForCandidate(candidateId, titleOverride)`
+  - 후보가 존재하지 않으면 `MissingCandidate`를 반환합니다.
+  - 시작 시각이 없으면 `NeedsUncertain`을 반환합니다.
+  - 시작/종료 구간으로 충돌 일정을 조회하고, 없으면 `Ready`, 있으면 `Conflict`를 반환합니다.
+
+- `saveFromCandidate(candidateId, selectedStatus, titleOverride, force)`
+  - transaction 안에서 후보 저장을 처리합니다.
+  - 후보가 없으면 `MissingCandidate`, 이미 pending이 아니면 `AlreadyHandled`를 반환합니다.
+  - `titleOverride` 또는 후보의 `extractedTitle`이 비어 있으면 `TitleRequired`를 반환합니다.
+  - 제목 override가 있으면 후보의 `extractedTitle`을 먼저 갱신합니다.
+  - 상태가 `Uncertain`이거나 시작 시간이 없으면 생성 시각을 fallback 시작 시각으로 사용해 저장하고 `SavedAsUncertain`을 반환합니다.
+  - 충돌이 있고 `force=false`이면 `Conflict`를 반환합니다.
+  - 충돌이 없거나 강제 저장이면 `insertSchedule` 후 후보를 `confirmed`로 바꾸고 `Saved`를 반환합니다.
+
+- `updateCandidate(candidateId, title, startAt, endAt, location)`
+  - 사용자가 편집 화면에서 입력한 제목/시작/종료/장소 값을 후보에 반영합니다.
+  - 제목은 trim하고, 장소 blank는 null로 저장합니다.
+
+- `discardCandidate(candidateId)`
+  - 후보가 존재하고 아직 `pending`이면 `discarded`로 표시합니다.
+
+- `insertSchedule(candidate, selectedStatus, titleOverride, forceStartAt)`
+  - 최종 `ScheduleEntity`를 생성해 `schedules` 테이블에 삽입하는 private helper입니다.
+  - 시작 시각은 `forceStartAt`, 후보의 시작 시각, 현재 시각 순으로 선택합니다.
+  - 후보 시작 시각이 없거나 선택 상태가 `Uncertain`이면 일정 상태를 `uncertain`으로 강제합니다.
+
+- `SaveAttempt`
+  - 저장 전 상태 확인 결과입니다: `MissingCandidate`, `NeedsUncertain`, `Ready`, `Conflict`.
+
+- `SaveResult`
+  - 실제 저장 시도 결과입니다: `Saved`, `SavedAsUncertain`, `AlreadyHandled`, `MissingCandidate`, `TitleRequired`, `Conflict`.
+
+---
+
+## 알림
+
+### `notification/AppointmentNotificationManager.kt`
+
+- `ensureChannels()`
+  - Android O 이상에서 일정 후보 채널과 충돌 채널을 생성합니다.
+
+- `showCandidate(candidate)`
+  - 알림 권한이 있으면 후보 알림을 표시합니다.
+  - 파싱된 시간/장소를 보여주고, inline `RemoteInput`으로 제목을 입력해 저장할 수 있는 액션을 제공합니다.
+  - 편집 화면으로 이동하는 액션도 제공합니다.
+
+- `showConflict(candidate, existing)`
+  - 충돌 알림을 표시합니다.
+  - 겹치는 기존 일정 정보를 보여주고, 강제 추가/편집/취소 액션을 제공합니다.
+
+- `cancelCandidate(candidateId)`
+  - 후보 알림과 충돌 알림을 모두 제거합니다.
+
+- `cancelCandidatePrompt(candidateId)`
+  - 후보 입력 알림만 제거하고 충돌 알림은 유지할 때 사용합니다.
+
+- `saveAction(candidateId, status, label)`
+  - 알림에서 제목을 입력하고 저장하는 `RemoteInput` 액션을 만듭니다.
+
+- `editAction(candidateId, label)`
+  - 후보 편집 화면을 여는 알림 액션을 만듭니다.
+
+- `conflictAction(candidateId, actionName, label)`
+  - 충돌 알림의 broadcast 액션을 만듭니다. 강제 추가/취소에 사용됩니다.
+
+- `conflictActivityAction(candidateId, label)`
+  - 충돌 해결 화면을 여는 activity 액션을 만듭니다.
+
+- `candidateSummary(candidate)`
+  - 후보 알림의 한 줄 요약을 만듭니다. 시작 시각이 없으면 “시간 미정” 취지의 문구를 사용하고 장소를 덧붙입니다.
+
+- `candidateDetails(candidate)`
+  - 후보 알림의 expanded text를 만듭니다. 제목 직접 입력 안내와 공유 출처를 포함합니다.
+
+- `formatRange(startAt, endAt)`
+  - 알림에 표시할 일정 구간 문자열을 만듭니다. 종료 시각이 없으면 기본 1시간을 적용합니다.
+
+- `canNotify()`
+  - Android 13 미만이거나 알림 권한이 허용되어 있는지 확인합니다.
+
+- `pendingFlags()`
+  - immutable/update-current PendingIntent flag 조합을 반환합니다.
+
+- `conflictNotificationId(candidateId)`
+  - 후보 ID 기반으로 충돌 알림 ID를 생성합니다.
+
+### `notification/NotificationActionReceiver.kt`
+
+- `onReceive(context, intent)`
+  - 알림 액션 broadcast를 받습니다.
+  - `goAsync()`와 앱 scope를 사용해 repository 작업을 비동기로 실행합니다.
+  - `ACTION_SAVE`, `ACTION_FORCE_ADD`, `ACTION_CANCEL`을 분기 처리합니다.
+  - 처리 결과에 따라 후보 알림/충돌 알림을 정리합니다.
+
+- `handleSave(app, intent, candidateId)`
+  - `RemoteInput`에서 사용자가 입력한 제목을 읽습니다.
+  - intent의 상태 값을 `ScheduleStatus`로 변환합니다.
+  - `PlannerRepository.saveFromCandidate`를 호출합니다.
+  - 제목이 없으면 후보 알림을 다시 보여주고, 충돌이면 충돌 알림을 띄웁니다.
+  - 충돌 알림을 유지해야 하는지 boolean으로 반환합니다.
+
+---
+
+## UI
+
+### `ui/MainActivity.kt`
+
+- `onCreate(savedInstanceState)`
+  - 시작 intent를 route로 변환합니다.
+  - Compose theme/surface를 구성하고 `AppRoot`를 표시합니다.
+  - 알림 권한 요청과 릴리즈 빌드의 Play in-app update 확인을 시작합니다.
+
+- `onResume()`
+  - 진행 중이던 immediate in-app update가 있으면 재개합니다.
+
+- `onNewIntent(intent)`
+  - 알림 deep link 등으로 새 intent가 들어오면 화면 route를 갱신합니다.
+
+- `maybeRequestNotifications()`
+  - Android 13 이상에서 앱 진입 시 알림 권한을 요청합니다.
+
+- `checkForAppUpdate()`
+  - 디버그 빌드가 아니면 Play Core로 즉시 업데이트 가능 여부를 확인하고 update flow를 시작합니다.
+
+- `resumeAppUpdateIfNeeded()`
+  - 개발자 트리거 업데이트가 진행 중이면 update flow를 다시 시작합니다.
+
+- `startRoute(intent)`
+  - intent extra를 읽어 `Planner`, `Candidate`, `Conflict` route 중 하나로 변환합니다.
+
+- `candidateIntent(context, candidateId)`
+  - 후보 편집 화면으로 이동하는 deep link intent를 생성합니다.
+
+- `conflictIntent(context, candidateId)`
+  - 충돌 해결 화면으로 이동하는 deep link intent를 생성합니다.
+
+- `AppRoot(route, onRoute)`
+  - 현재 route에 따라 `PlannerScreen`, `CandidateEditScreen`, `ConflictScreen` 중 하나를 렌더링합니다.
+
+### `ui/PlannerScreen.kt`
+
+- `PlannerScreen(repository, onOpenCandidate)`
+  - 저장 일정과 pending 후보를 관찰합니다.
+  - 직접 입력 텍스트로 새 후보를 생성할 수 있습니다.
+  - pending 후보 chip을 누르면 후보 편집 화면으로 이동합니다.
+  - 저장 일정은 날짜별로 그룹화해 리스트로 보여줍니다.
+
+- `ScheduleRow(schedule)`
+  - 일정 1건을 카드 행으로 렌더링합니다.
+  - 상태에 따라 색상을 다르게 표시하고, 시간/제목/장소/상태를 보여줍니다.
+
+### `ui/CandidateEditScreen.kt`
+
+- `CandidateEditScreen(repository, candidateId, onDone, onConflict)`
+  - 후보 1건을 관찰해 제목, 시작, 종료, 장소 입력 필드를 제공합니다.
+  - 제목이 비어 있으면 저장 버튼을 비활성화합니다.
+  - 저장 시 먼저 `updateCandidate`로 편집값을 반영하고 `saveFromCandidate`를 호출합니다.
+  - 충돌 결과가 오면 충돌 화면으로 이동하고, 그 외 결과는 완료 처리합니다.
+
+- `StatusSelector(status, onStatus)`
+  - `confirmed`, `planned`, `uncertain` 상태를 선택하는 FilterChip row를 렌더링합니다.
+
+### `ui/ConflictScreen.kt`
+
+- `ConflictScreen(repository, candidateId, onEdit, onDone)`
+  - 후보와 충돌 일정을 조회해 표시합니다.
+  - `conflictsForCandidate`로 겹치는 일정을 로드합니다.
+  - 제목이 있으면 강제 추가 버튼을 활성화합니다.
+  - 강제 추가는 `saveFromCandidate(..., force = true)`, 취소는 `discardCandidate`를 호출합니다.
+
+### `ui/UiFormat.kt`
+
+- `formatDateTime(millis)`
+  - epoch milliseconds를 `Asia/Seoul` 기준 `yyyy-MM-dd HH:mm` 문자열로 변환합니다. null이면 빈 문자열입니다.
+
+- `formatDay(millis)`
+  - epoch milliseconds를 `Asia/Seoul` 기준 `yyyy-MM-dd` 날짜 문자열로 변환합니다.
+
+- `formatTime(millis)`
+  - epoch milliseconds를 `Asia/Seoul` 기준 `HH:mm` 시간 문자열로 변환합니다.
+
+- `parseDateTimeOrNull(value)`
+  - 사용자가 입력한 `yyyy-MM-dd HH:mm` 문자열을 epoch milliseconds로 변환합니다.
+  - 파싱 실패 시 null을 반환합니다.
+
+### `ui/FeedLoopTheme.kt`
+
+- `FeedLoopCardColors()`
+  - 앱 카드에서 공통으로 사용하는 Material3 Card color 설정을 반환합니다.
+
+---
+
+## 위젯 동기화/렌더링
+
+### `widget/PlannerWidgetSync.kt`
+
+- `syncFromPlannerDatabase(context)`
+  - 앱 context가 `OnMyPlateApp`이면 기존 database를 사용하고, 아니면 새 `AppDatabase`를 열어 모든 일정을 조회합니다.
+  - 조회 결과로 `saveSnapshot`을 호출합니다.
+  - 임시로 연 DB는 작업 후 닫습니다.
+
+- `saveSnapshot(context, schedules)`
+  - 저장 일정을 시작 시각 기준으로 정렬합니다.
+  - `Asia/Seoul` 날짜별로 `manualEventsByDate` JSON을 구성합니다.
+  - 각 일정은 title, startMinute, endMinute, source=`manual`, isRecurring=false로 저장합니다.
+  - 현재 주 월요일, viewport 기본값, schema, generatedAt을 포함한 snapshot JSON을 SharedPreferences에 저장합니다.
+
+### `widget/PlannerWidgetStore.java`
+
+- `getPrefs(context)`
+  - 위젯 snapshot 저장에 쓰는 SharedPreferences를 반환합니다.
+
+- `saveSummarySnapshot(context, snapshotJson)`
+  - `summary_snapshot` key에 snapshot JSON을 저장합니다.
+  - 저장 직후 `SummaryWidgetProvider.refreshAll`로 모든 위젯을 갱신합니다.
+
+### `widget/SummaryWidgetProvider.java`
+
+- `onUpdate(context, appWidgetManager, appWidgetIds)`
+  - 위젯 업데이트 시 DB에서 snapshot 동기화를 요청하고, 각 위젯의 RemoteViews를 갱신합니다.
+
+- `onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)`
+  - 위젯 크기/옵션 변경 시 snapshot을 동기화하고 해당 위젯을 다시 렌더링합니다.
+
+- `onDeleted(context, appWidgetIds)`
+  - 삭제된 위젯별 week offset과 viewport 축소 상태 preference를 제거합니다.
+
+- `onReceive(context, intent)`
+  - 위젯 클릭 액션을 처리합니다.
+  - planner 열기, 이전 주, 다음 주, viewport 토글을 분기합니다.
+  - 상태 변경 후 해당 위젯 RemoteViews를 갱신합니다.
+
+- `refreshAll(context)`
+  - 현재 provider에 속한 모든 위젯 ID를 찾아 다시 렌더링합니다.
+
+- `buildRemoteViews(context, manager, appWidgetId)`
+  - SharedPreferences snapshot과 위젯별 상태를 읽습니다.
+  - 주간 라벨과 timetable bitmap을 설정합니다.
+  - 루트/이전/다음/viewport 토글 클릭 액션을 연결합니다.
+
+- `bindAction(context, views, appWidgetId, viewId, action)`
+  - 특정 view ID에 broadcast PendingIntent를 연결합니다.
+  - action과 appWidgetId로 unique data URI를 만들어 PendingIntent 충돌을 방지합니다.
+
+- `renderTimetableBitmap(context, manager, appWidgetId, state, days)`
+  - 위젯 크기와 viewport에 맞는 주간 시간표 bitmap을 직접 그립니다.
+  - 요일 헤더, 시간 grid, 빈 상태 문구, 일정 블록, 겹침 lane 배치를 처리합니다.
+
+- `getWidgetSize(context, manager, appWidgetId)`
+  - AppWidget option에서 min width/height dp를 읽고 px 단위 `WidgetSize`로 변환합니다.
+
+- `dpToPx(context, dp)`
+  - dp 값을 현재 density 기준 px로 변환합니다.
+
+- `formatHourLabel(hour)`
+  - 시간 rail에 표시할 `HH:00` 라벨을 만듭니다.
+
+- `formatMinute(minute)`
+  - 0~24시 범위로 보정한 minute 값을 `HH:mm` 문자열로 변환합니다.
+
+- `fitWidgetText(text, paint, width)`
+  - 주어진 폭에 맞게 텍스트를 그대로 사용하거나 ellipsize합니다.
+  - ellipsize 결과가 실질적으로 비어 보이면 폭 기반 최소 문자 수로 fallback합니다.
+
+- `buildWidgetTitle(item)`
+  - 일정 제목에 반복 일정 표시 `(P)` suffix를 붙입니다.
+
+- `formatCompactRange(startMinute, endMinute)`
+  - 일정 블록 안에 표시할 `시작-종료` compact 문자열을 만듭니다.
+
+- `formatCompactMinute(minute)`
+  - minute 값을 compact 시간 문자열로 변환합니다. 정각이면 `HH`, 아니면 `HH:mm`입니다.
+
+- `buildEventLayouts(items)`
+  - 같은 날짜의 일정들을 겹침 여부에 따라 lane에 배치합니다.
+  - 각 `EventLayout`에 lane 번호와 전체 lane 수를 설정합니다.
+
+- `getWeekOffsetKey(appWidgetId)`
+  - 위젯별 주 이동 offset preference key를 만듭니다.
+
+- `getViewportShrunkKey(appWidgetId)`
+  - 위젯별 viewport 축소 상태 preference key를 만듭니다.
+
+- `updateWeekOffset(context, appWidgetId, delta)`
+  - 위젯별 week offset을 delta만큼 변경해 저장합니다.
+
+- `formatWeekLabel(weekStart)`
+  - 주 시작일~종료일 범위 라벨을 만듭니다.
+
+- `formatMonthDay(calendar, includeMonth)`
+  - 월/일 라벨을 만듭니다. `includeMonth=false`이면 일자만 표시합니다.
+
+- `parseDate(dateStr)`
+  - `yyyy-MM-dd` 문자열을 자정 Calendar로 변환합니다.
+  - null/잘못된 값이면 오늘 자정 Calendar를 반환합니다.
+
+- `formatDate(calendar)`
+  - Calendar를 `yyyy-MM-dd` 문자열로 변환합니다.
+
+- `WidgetState.from(context, appWidgetId, snapshot)`
+  - 위젯별 week offset과 viewport 축소 여부를 읽어 현재 렌더링 상태를 만듭니다.
+  - 시작 시간은 08:00, 종료 시간은 축소 시 18:00 / 기본 24:00입니다.
+
+- `SharedPreferencesSnapshot.getWeekStartForOffset(offset)`
+  - snapshot의 기준 주 시작일에 offset 주 수를 더한 Calendar를 반환합니다.
+
+- `SharedPreferencesSnapshot.buildWeekDays(offset)`
+  - offset이 적용된 월~일 7일 데이터를 만듭니다.
+  - 날짜별 수동 일정을 병합하고 시작/종료/제목 순으로 정렬합니다.
+
+- `SharedPreferencesSnapshot.from(context)`
+  - SharedPreferences의 snapshot JSON을 읽어 위젯 렌더링 모델로 변환합니다.
+  - 파싱 실패 시 빈 snapshot fallback을 반환합니다.
+
+- `ScheduleItemSnapshot.from(json)`
+  - JSON 일정 item을 위젯 내부 모델로 변환합니다.
+  - 시작/종료 minute 값이 유효하지 않으면 null을 반환합니다.
+
+---
+
+## Entity 데이터 구조
+
+### `data/entity/AppointmentCandidateEntity.kt`
+
+- `AppointmentCandidateEntity`
+  - 공유/직접 입력으로 생성된 “일정 후보”입니다.
+  - 원본 텍스트, 공유 출처, 파싱된 시작/종료/장소, 사용자가 입력할 제목, 상태, 생성 시각을 보관합니다.
+
+### `data/entity/ScheduleEntity.kt`
+
+- `ScheduleEntity`
+  - 최종 저장된 일정입니다.
+  - 제목, 시작/종료 시각, 장소, 메모, 상태, 원본 텍스트/출처, 생성/수정 시각을 보관합니다.
