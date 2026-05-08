@@ -1,4 +1,8 @@
-# Repository Agent Instructions
+﻿# Repository Agent Instructions
+
+## Documentation Maintenance
+
+- When changing app behavior, architecture, public workflows, or any function documented in `spec_func.md`, update `spec_func.md` in the same change so the function-level specification stays current.
 
 ## Android Release Workflow
 
