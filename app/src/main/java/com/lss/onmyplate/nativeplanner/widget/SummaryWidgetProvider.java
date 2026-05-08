@@ -171,41 +171,41 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
         float gridRight = width;
 
         Paint panelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        panelPaint.setColor(Color.parseColor("#101826"));
-        panelPaint.setAlpha(220);
+        panelPaint.setColor(Color.parseColor("#FFFFFF"));
+        panelPaint.setAlpha(238);
         canvas.drawRoundRect(new RectF(0, 0, width, height), outerRadius, outerRadius, panelPaint);
 
         Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         borderPaint.setStyle(Paint.Style.STROKE);
         borderPaint.setStrokeWidth(Math.max(1f, density));
-        borderPaint.setColor(Color.parseColor("#233349"));
+        borderPaint.setColor(Color.parseColor("#E8D9C7"));
         canvas.drawRoundRect(new RectF(0.5f, 0.5f, width - 0.5f, height - 0.5f), outerRadius, outerRadius, borderPaint);
 
         TextPaint weekdayPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        weekdayPaint.setColor(Color.parseColor("#F3F7FF"));
+        weekdayPaint.setColor(Color.parseColor("#2F2924"));
         weekdayPaint.setTextSize(10f * density);
         weekdayPaint.setFakeBoldText(true);
         weekdayPaint.setTextAlign(Paint.Align.CENTER);
 
         TextPaint datePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        datePaint.setColor(Color.parseColor("#8FA4BF"));
+        datePaint.setColor(Color.parseColor("#6F6258"));
         datePaint.setTextSize(9f * density);
         datePaint.setTextAlign(Paint.Align.CENTER);
 
         TextPaint hourPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        hourPaint.setColor(Color.parseColor("#72849D"));
+        hourPaint.setColor(Color.parseColor("#A89C91"));
         hourPaint.setTextSize(8.5f * density);
 
         Paint gridLinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        gridLinePaint.setColor(Color.parseColor("#26364B"));
+        gridLinePaint.setColor(Color.parseColor("#E8D9C7"));
         gridLinePaint.setStrokeWidth(Math.max(1f, density * 0.8f));
 
         Paint fineLinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        fineLinePaint.setColor(Color.parseColor("#1B2738"));
+        fineLinePaint.setColor(Color.parseColor("#F1E8DD"));
         fineLinePaint.setStrokeWidth(Math.max(1f, density * 0.6f));
 
         Paint dayHeaderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        dayHeaderPaint.setColor(Color.parseColor("#121E2F"));
+        dayHeaderPaint.setColor(Color.parseColor("#FFF3E0"));
         dayHeaderPaint.setAlpha(235);
 
         canvas.drawRoundRect(new RectF(gridLeft, 0, gridRight, headerHeight), 12f * density, 12f * density, dayHeaderPaint);
@@ -246,7 +246,7 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
 
         if (!hasItems) {
             TextPaint emptyPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-            emptyPaint.setColor(Color.parseColor("#8FA4BF"));
+            emptyPaint.setColor(Color.parseColor("#6F6258"));
             emptyPaint.setTextSize(11f * density);
             emptyPaint.setTextAlign(Paint.Align.CENTER);
             canvas.drawText("No plans this week", width / 2f, bodyTop + (bodyHeight / 2f), emptyPaint);
@@ -259,12 +259,12 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
         blockStrokePaint.setStrokeWidth(Math.max(1f, density * 0.8f));
 
         TextPaint blockTimePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        blockTimePaint.setColor(Color.parseColor("#D9E7FF"));
+        blockTimePaint.setColor(Color.parseColor("#7A4A1B"));
         blockTimePaint.setTextSize(6.8f * density);
         blockTimePaint.setFakeBoldText(true);
 
         TextPaint blockTitlePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        blockTitlePaint.setColor(Color.parseColor("#F7FAFF"));
+        blockTitlePaint.setColor(Color.parseColor("#2F2924"));
         blockTitlePaint.setTextSize(7.8f * density);
         blockTitlePaint.setFakeBoldText(true);
 
@@ -296,11 +296,11 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
 
                 RectF blockRect = new RectF(left, top, right, bottom);
                 int fillColor = "auto".equals(layout.item.source)
-                    ? Color.parseColor("#1E6E62")
-                    : Color.parseColor("#395C9A");
+                    ? Color.parseColor("#EAF7ED")
+                    : Color.parseColor("#FFE3C2");
                 int strokeColor = "auto".equals(layout.item.source)
-                    ? Color.parseColor("#74E0CC")
-                    : Color.parseColor("#7FA8FF");
+                    ? Color.parseColor("#B9D8C2")
+                    : Color.parseColor("#F4A261");
                 blockPaint.setColor(fillColor);
                 blockStrokePaint.setColor(strokeColor);
                 canvas.drawRoundRect(blockRect, 8f * density, 8f * density, blockPaint);

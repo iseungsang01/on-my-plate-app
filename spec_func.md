@@ -359,29 +359,34 @@
 - `PlannerScreen(repository, onOpenCandidate)`
   - 저장 일정과 pending 후보를 관찰합니다.
   - 직접 입력 텍스트로 새 후보를 생성할 수 있습니다.
+  - `promise_basket_design.md` 기반의 Warm Ivory/Apricot 배경, elevated 입력 카드, 살구색 primary 버튼을 사용합니다.
   - pending 후보 chip을 누르면 후보 편집 화면으로 이동합니다.
   - 저장 일정은 날짜별로 그룹화해 리스트로 보여줍니다.
+  - 저장 일정이 없으면 첫 약속 추가를 유도하는 warm empty-state 카드를 표시합니다.
 
 - `ScheduleRow(schedule)`
   - 일정 1건을 카드 행으로 렌더링합니다.
-  - 상태에 따라 색상을 다르게 표시하고, 시간/제목/장소/상태를 보여줍니다.
+  - 상태에 따라 Promise Basket 상태 색상 배지를 다르게 표시하고, 시간/제목/장소/상태를 보여줍니다.
 
 ### `ui/CandidateEditScreen.kt`
 
 - `CandidateEditScreen(repository, candidateId, onDone, onConflict)`
   - 후보 1건을 관찰해 제목, 시작, 종료, 장소 입력 필드를 제공합니다.
+  - 후보 편집 필드는 warm elevated 카드 안에 배치하고, focused border/label은 Apricot 계열 색상을 사용합니다.
   - 제목이 비어 있으면 저장 버튼을 비활성화합니다.
   - 저장 시 먼저 `updateCandidate`로 편집값을 반영하고 `saveFromCandidate`를 호출합니다.
   - 충돌 결과가 오면 충돌 화면으로 이동하고, 그 외 결과는 완료 처리합니다.
 
 - `StatusSelector(status, onStatus)`
   - `confirmed`, `planned`, `uncertain` 상태를 선택하는 FilterChip row를 렌더링합니다.
+  - 선택 상태별로 ready/incomplete/pending 팔레트를 적용합니다.
 
 ### `ui/ConflictScreen.kt`
 
 - `ConflictScreen(repository, candidateId, onEdit, onDone)`
   - 후보와 충돌 일정을 조회해 표시합니다.
   - `conflictsForCandidate`로 겹치는 일정을 로드합니다.
+  - conflict soft gradient 배경, red-brown 텍스트, danger border 카드로 충돌 상태를 강조합니다.
   - 제목이 있으면 강제 추가 버튼을 활성화합니다.
   - 강제 추가는 `saveFromCandidate(..., force = true)`, 취소는 `discardCandidate`를 호출합니다.
 
@@ -404,6 +409,7 @@
 
 - `FeedLoopCardColors()`
   - 앱 카드에서 공통으로 사용하는 Material3 Card color 설정을 반환합니다.
+  - `FeedLoopColors`와 `FeedLoopColorScheme`은 `promise_basket_design.md`의 Promise Basket 팔레트(Soft Apricot, Warm Ivory, Charcoal Brown, 상태 색상 등)를 Material3 색상으로 제공합니다.
 
 ---
 
@@ -462,6 +468,7 @@
 - `renderTimetableBitmap(context, manager, appWidgetId, state, days)`
   - 위젯 크기와 viewport에 맞는 주간 시간표 bitmap을 직접 그립니다.
   - 요일 헤더, 시간 grid, 빈 상태 문구, 일정 블록, 겹침 lane 배치를 처리합니다.
+  - 위젯 배경/칩/시간표 bitmap은 Promise Basket의 Warm Basket Gradient, warm border, Apricot 일정 블록 색상으로 렌더링합니다.
 
 - `getWidgetSize(context, manager, appWidgetId)`
   - AppWidget option에서 min width/height dp를 읽고 px 단위 `WidgetSize`로 변환합니다.
