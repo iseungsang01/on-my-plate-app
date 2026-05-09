@@ -22,6 +22,7 @@ class PlannerRepository(
     fun observePendingCandidates(): Flow<List<AppointmentCandidateEntity>> = candidates.observePending()
     fun observeCandidate(id: String): Flow<AppointmentCandidateEntity?> = candidates.observe(id)
     suspend fun getCandidate(id: String): AppointmentCandidateEntity? = candidates.get(id)
+    suspend fun getSchedules(): List<ScheduleEntity> = schedules.getAll()
 
     suspend fun createCandidate(rawText: String, sourceApp: String?, receivedAt: Long): AppointmentCandidateEntity {
         val parsed = parser.parse(rawText, receivedAt)

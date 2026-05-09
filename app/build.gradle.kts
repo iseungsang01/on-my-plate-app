@@ -60,6 +60,21 @@ android {
             "GEMINI_API_BASE_URL",
             "\"${envOrDotenv("GEMINI_API_BASE_URL") ?: "https://generativelanguage.googleapis.com/v1beta"}\"",
         )
+        buildConfigField(
+            "String",
+            "PLANNER_API_BASE_URL",
+            "\"${envOrDotenv("PLANNER_API_BASE_URL") ?: envOrDotenv("VITE_PLANNER_API_BASE_URL").orEmpty()}\"",
+        )
+        buildConfigField(
+            "String",
+            "PLANNER_SESSION_PREFS_NAME",
+            "\"${envOrDotenv("PLANNER_SESSION_PREFS_NAME") ?: "planner_auth"}\"",
+        )
+        buildConfigField(
+            "String",
+            "PLANNER_SESSION_TOKEN_KEY",
+            "\"${envOrDotenv("PLANNER_SESSION_TOKEN_KEY") ?: "session_token"}\"",
+        )
     }
 
     buildFeatures {

@@ -129,6 +129,7 @@ class MainActivity : ComponentActivity() {
 
 sealed interface Route {
     data object Planner : Route
+    data object Sharing : Route
     data class Candidate(val candidateId: String) : Route
     data class Conflict(val candidateId: String) : Route
 }
@@ -137,7 +138,16 @@ sealed interface Route {
 private fun AppRoot(route: Route, onRoute: (Route) -> Unit) {
     val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as OnMyPlateApp
     when (route) {
-        Route.Planner -> PlannerScreen(repository = app.repository, onOpenCandidate = { onRoute(Route.Candidate(it)) })
+        Route.Planner -> PlannerScreen(
+            repository = app.repository,
+            onOpenCandidate = { onRoute(Route.Candidate(it)) },
+            onOpenSharing = { onRoute(Route.Sharing) },
+        )
+        Route.Sharing -> SharingScreen(
+            plannerRepository = app.repository,
+            sharingRepository = app.sharingRepository,
+            onBack = { onRoute(Route.Planner) },
+        )
         is Route.Candidate -> CandidateEditScreen(
             repository = app.repository,
             candidateId = route.candidateId,

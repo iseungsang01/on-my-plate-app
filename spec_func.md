@@ -195,6 +195,34 @@
 
 ## Repository
 
+### `data/supabase/SharingRepository.kt`
+
+- `isConfigured()`
+  - Returns whether `PLANNER_API_BASE_URL` is configured for share API calls.
+
+- `cachedPublicId()`
+  - Returns the cached `public_id` last received from the share API.
+
+- `ensureProfile()`
+  - Reads the existing app login token from SharedPreferences and calls `POST /api/planner/share/profile`.
+  - Caches the response `publicId` and returns `ShareProfile`.
+
+- `createGroupWithPartner(partnerPublicId)`
+  - Trims the partner sharing ID and calls `POST /api/planner/share/groups` to create or reuse a group.
+
+- `listGroups()`
+  - Calls `GET /api/planner/share/groups` and returns groups accessible to the current logged-in user.
+
+- `uploadSchedule(groupId, schedule)`
+  - Converts one selected Room schedule to the API contract's camelCase JSON and uploads it with `POST /api/planner/share/groups/{groupId}/schedules`.
+
+- `listSharedSchedules(groupId, includeDummy)`
+  - Calls `GET /api/planner/share/groups/{groupId}/schedules?includeDummy=...` and returns schedules sorted by start time.
+
+- `PlannerShareApiClient.request(...)`
+  - Adds `Authorization: Bearer <existing-app-session-token>` to every share API request.
+  - Does not use Supabase Auth, Supabase access/refresh tokens, or direct PostgREST writes on Android.
+
 ### `data/repository/PlannerRepository.kt`
 
 - `observeSchedules()`
@@ -367,6 +395,21 @@
 - `ScheduleRow(schedule)`
   - 일정 1건을 카드 행으로 렌더링합니다.
   - 상태에 따라 Promise Basket 상태 색상 배지를 다르게 표시하고, 시간/제목/장소/상태를 보여줍니다.
+
+### `ui/SharingScreen.kt`
+
+- `SharingScreen(plannerRepository, sharingRepository, onBack)`
+  - Loads or creates the current user's sharing ID through the external share API, and creates groups with a partner sharing ID.
+  - Displays local Room schedules and uploads only the schedule selected by the user.
+  - Displays real shared schedules for the selected group, optionally including dummy schedules returned by the API.
+  - Shows a setup/login error when the share API base URL or existing app session token is missing.
+  - Provides a checkbox for including dummy schedules.
+
+- `LocalShareRow(schedule, enabled, onUpload)`
+  - Renders one local Room schedule with a share button.
+
+- `SharedScheduleRow(schedule)`
+  - Renders one schedule returned by the share API. If `isDummy=true`, it also shows the shared-only chip.
 
 ### `ui/CandidateEditScreen.kt`
 

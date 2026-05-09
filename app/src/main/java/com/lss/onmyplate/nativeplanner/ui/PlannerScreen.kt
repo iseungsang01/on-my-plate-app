@@ -19,7 +19,7 @@ import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import kotlinx.coroutines.launch
 
 @Composable
-fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Unit) {
+fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Unit, onOpenSharing: () -> Unit) {
     val schedules by repository.observeSchedules().collectAsState(initial = emptyList())
     val pending by repository.observePendingCandidates().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
@@ -38,15 +38,18 @@ fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Un
             Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "?? ???",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = FeedLoopColors.TextPrimary,
+                    )
+                    OutlinedButton(onClick = onOpenSharing) { Text("??") }
+                }
                 Text(
-                    "약속 바구니",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = FeedLoopColors.TextPrimary,
-                )
-                Text(
-                    "메시지 속 약속을 담아두고, 겹침 없이 일정으로 정리하세요.",
+                    "??? ? ??? ????, ?? ?? ???? ?????.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = FeedLoopColors.Secondary,
                 )

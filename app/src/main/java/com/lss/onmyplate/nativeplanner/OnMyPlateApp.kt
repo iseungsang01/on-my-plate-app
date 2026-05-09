@@ -4,6 +4,7 @@ import android.app.Application
 import com.lss.onmyplate.nativeplanner.BuildConfig
 import com.lss.onmyplate.nativeplanner.data.db.AppDatabase
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
+import com.lss.onmyplate.nativeplanner.data.supabase.SharingRepository
 import com.lss.onmyplate.nativeplanner.domain.parser.GeminiAppointmentParser
 import com.lss.onmyplate.nativeplanner.domain.parser.KoreanAppointmentParser
 import com.lss.onmyplate.nativeplanner.notification.AppointmentNotificationManager
@@ -26,6 +27,7 @@ class OnMyPlateApp : Application() {
         )
     }
     val repository by lazy { PlannerRepository(database, parser) }
+    val sharingRepository by lazy { SharingRepository(this) }
     val notifications by lazy { AppointmentNotificationManager(this) }
 
     override fun onCreate() {

@@ -1,0 +1,168 @@
+# Supabase SQL for shared planner schedules
+
+Run this file in the Supabase SQL Editor for the server-mediated sharing design. The Android app must not write these tables directly. A trusted backend verifies the existing app session token, derives the app user ID, and then uses a server-only Supabase service role key or private database connection to perform the database work.
+
+Security notes from the current Supabase docs:
+
+- Tables in the exposed `public` schema must have Row Level Security enabled.
+- When RLS is enabled and no client policies are defined, publishable/anon clients cannot access the rows through the Data API.
+- `SUPABASE_SERVICE_ROLE_KEY` must never be shipped in the Android app; keep it only on the backend.
+
+If you previously applied the anonymous Supabase Auth draft, recreate or migrate these tables before applying this SQL because `planner_profiles.auth_user_id uuid` has been replaced with `planner_profiles.user_id text`.
+
+```sql
+create extension if not exists pgcrypto;
+
+create table if not exists public.planner_profiles (
+  user_id text primary key,
+  public_id text not null unique,
+  display_name text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint planner_profiles_public_id_format
+    check (public_id ~ '^omp-[A-Z0-9]{6,16}$')
+);
+
+create table if not exists public.planner_groups (
+  id uuid primary key default gen_random_uuid(),
+  name text not null default '?? ??',
+  created_by text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.planner_group_members (
+  group_id uuid not null references public.planner_groups(id) on delete cascade,
+  user_id text not null,
+  role text not null default 'member' check (role in ('owner', 'member')),
+  joined_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+
+create table if not exists public.planner_schedules (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references public.planner_groups(id) on delete cascade,
+  local_schedule_id text,
+  created_by text not null,
+  title text not null,
+  start_at timestamptz not null,
+  end_at timestamptz,
+  location text,
+  memo text,
+  status text not null default 'planned' check (status in ('confirmed', 'planned', 'uncertain')),
+  source_text text,
+  source_app text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (group_id, created_by, local_schedule_id)
+);
+
+create table if not exists public.planner_dummy_schedules (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references public.planner_groups(id) on delete cascade,
+  created_by text not null,
+  title text not null,
+  start_at timestamptz not null,
+  end_at timestamptz,
+  location text,
+  memo text,
+  status text not null default 'planned' check (status in ('confirmed', 'planned', 'uncertain')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists planner_profiles_public_id_idx on public.planner_profiles(public_id);
+create index if not exists planner_group_members_user_id_idx on public.planner_group_members(user_id);
+create index if not exists planner_schedules_group_start_idx on public.planner_schedules(group_id, start_at);
+create index if not exists planner_dummy_schedules_group_start_idx on public.planner_dummy_schedules(group_id, start_at);
+
+alter table public.planner_profiles enable row level security;
+alter table public.planner_groups enable row level security;
+alter table public.planner_group_members enable row level security;
+alter table public.planner_schedules enable row level security;
+alter table public.planner_dummy_schedules enable row level security;
+
+-- Remove policies from the previous anonymous Supabase Auth draft, if present.
+drop policy if exists "profiles are lookupable by authenticated users" on public.planner_profiles;
+drop policy if exists "users create their own profile" on public.planner_profiles;
+drop policy if exists "users update their own profile" on public.planner_profiles;
+drop policy if exists "members can read their groups" on public.planner_groups;
+drop policy if exists "authenticated users create groups" on public.planner_groups;
+drop policy if exists "creators update groups" on public.planner_groups;
+drop policy if exists "members can read own membership rows" on public.planner_group_members;
+drop policy if exists "users and group creators add members" on public.planner_group_members;
+drop policy if exists "users remove own membership" on public.planner_group_members;
+drop policy if exists "members read shared schedules" on public.planner_schedules;
+drop policy if exists "members insert shared schedules" on public.planner_schedules;
+drop policy if exists "creators update shared schedules" on public.planner_schedules;
+drop policy if exists "creators delete shared schedules" on public.planner_schedules;
+drop policy if exists "members read dummy schedules" on public.planner_dummy_schedules;
+drop policy if exists "members insert dummy schedules" on public.planner_dummy_schedules;
+drop policy if exists "creators update dummy schedules" on public.planner_dummy_schedules;
+drop policy if exists "creators delete dummy schedules" on public.planner_dummy_schedules;
+
+-- No anon/authenticated policies are created. The backend must enforce membership
+-- and ownership checks before using its server-only credentials.
+revoke all on public.planner_profiles from anon, authenticated;
+revoke all on public.planner_groups from anon, authenticated;
+revoke all on public.planner_group_members from anon, authenticated;
+revoke all on public.planner_schedules from anon, authenticated;
+revoke all on public.planner_dummy_schedules from anon, authenticated;
+
+grant all on public.planner_profiles to service_role;
+grant all on public.planner_groups to service_role;
+grant all on public.planner_group_members to service_role;
+grant all on public.planner_schedules to service_role;
+grant all on public.planner_dummy_schedules to service_role;
+
+-- Optional seed data for backend/API smoke tests.
+insert into public.planner_profiles (user_id, public_id, display_name)
+values
+  ('demo-user-a', 'omp-DEMO0001', 'Demo A'),
+  ('demo-user-b', 'omp-DEMO0002', 'Demo B')
+on conflict (user_id) do update
+set public_id = excluded.public_id,
+    display_name = excluded.display_name,
+    updated_at = now();
+
+insert into public.planner_groups (id, name, created_by)
+values ('10000000-0000-0000-0000-000000000001', 'Demo shared group', 'demo-user-a')
+on conflict (id) do update set name = excluded.name;
+
+insert into public.planner_group_members (group_id, user_id, role)
+values
+  ('10000000-0000-0000-0000-000000000001', 'demo-user-a', 'owner'),
+  ('10000000-0000-0000-0000-000000000001', 'demo-user-b', 'member')
+on conflict (group_id, user_id) do update set role = excluded.role;
+
+insert into public.planner_schedules (group_id, local_schedule_id, created_by, title, start_at, end_at, location, status, source_app)
+values (
+  '10000000-0000-0000-0000-000000000001',
+  'local-demo-1',
+  'demo-user-a',
+  '?? ?? ??',
+  now() + interval '1 day',
+  now() + interval '1 day 1 hour',
+  '???',
+  'confirmed',
+  'seed'
+)
+on conflict (group_id, created_by, local_schedule_id) do update
+set title = excluded.title,
+    start_at = excluded.start_at,
+    end_at = excluded.end_at,
+    location = excluded.location,
+    status = excluded.status,
+    updated_at = now();
+
+insert into public.planner_dummy_schedules (group_id, created_by, title, start_at, end_at, location, status, memo)
+values (
+  '10000000-0000-0000-0000-000000000001',
+  'demo-user-b',
+  '?? ?? ?? ?? ??',
+  now() + interval '2 days',
+  now() + interval '2 days 30 minutes',
+  '???',
+  'planned',
+  '?? Room?? ??? ???? ?? ???? ??'
+);
+```

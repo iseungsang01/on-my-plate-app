@@ -242,3 +242,15 @@
 `app/src/test/java/.../widget/PlannerWidgetSyncTest.kt`
 
 - Room 일정에서 위젯 스냅샷이 생성되는지 검증합니다.
+
+## Supabase sharing architecture
+
+- Local Room remains the source of truth for personal schedules, conflict checks, candidate parsing, and widget snapshots.
+- Sharing is opt-in from the planner screen. Android calls the external planner sharing API configured by `PLANNER_API_BASE_URL`.
+- Android reads the existing app login token from SharedPreferences and sends it as `Authorization: Bearer <token>`. Defaults: `PLANNER_SESSION_PREFS_NAME=planner_auth`, `PLANNER_SESSION_TOKEN_KEY=session_token`.
+- Android does not create anonymous Supabase Auth sessions, store Supabase access/refresh tokens, or write directly to Supabase PostgREST tables.
+- A trusted backend verifies the existing session token, resolves the app user ID, checks group membership/ownership, and performs Supabase DB work with server-only credentials.
+- Entering a partner `public_id` asks the sharing API to create or reuse a group and return accessible groups/schedules.
+- Only selected local schedules are uploaded to the sharing API; they remain independent copies of Room rows.
+- Shared-screen-only dummy schedules are read through the API but are never inserted into Room, conflict detection, notifications, or widget snapshots.
+- Required mobile configuration: `PLANNER_API_BASE_URL`. `SUPABASE_SERVICE_ROLE_KEY` is server-only and must never be included in the app.
