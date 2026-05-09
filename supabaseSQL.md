@@ -1,17 +1,4 @@
-# Supabase SQL for shared planner schedules
-
-Run this file in the Supabase SQL Editor for the server-mediated sharing design. The Android app must not write these tables directly. A trusted backend verifies the existing app session token, derives the app user ID, and then uses a server-only Supabase service role key or private database connection to perform the database work.
-
-Security notes from the current Supabase docs:
-
-- Tables in the exposed `public` schema must have Row Level Security enabled.
-- When RLS is enabled and no client policies are defined, publishable/anon clients cannot access the rows through the Data API.
-- `SUPABASE_SERVICE_ROLE_KEY` must never be shipped in the Android app; keep it only on the backend.
-
-If you previously applied the anonymous Supabase Auth draft, recreate or migrate these tables before applying this SQL because `planner_profiles.auth_user_id uuid` has been replaced with `planner_profiles.user_id text`.
-
-```sql
-create extension if not exists pgcrypto;
+reate extension if not exists pgcrypto;
 
 create table if not exists public.planner_profiles (
   user_id text primary key,
@@ -165,4 +152,3 @@ values (
   'planned',
   '?? Room?? ??? ???? ?? ???? ??'
 );
-```
