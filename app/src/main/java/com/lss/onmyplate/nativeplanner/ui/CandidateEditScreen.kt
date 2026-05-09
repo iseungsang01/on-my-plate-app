@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
@@ -22,6 +23,7 @@ fun CandidateEditScreen(
     candidateId: String,
     onDone: () -> Unit,
     onConflict: () -> Unit,
+    onBack: () -> Unit = onDone,
 ) {
     val candidate by repository.observeCandidate(candidateId).collectAsState(initial = null)
     val scope = rememberCoroutineScope()
@@ -29,68 +31,79 @@ fun CandidateEditScreen(
     var startAt by remember(candidate?.id) { mutableStateOf(formatDateTime(candidate?.extractedStartAt)) }
     var endAt by remember(candidate?.id) { mutableStateOf(formatDateTime(candidate?.extractedEndAt)) }
     var location by remember(candidate?.id) { mutableStateOf(candidate?.extractedLocation.orEmpty()) }
-    var status by remember { mutableStateOf(ScheduleStatus.Confirmed) }
+    var status by remember(candidate?.id) { mutableStateOf(ScheduleStatus.Confirmed) }
     val canSave = title.isNotBlank()
 
     if (candidate == null) {
-        Box(Modifier.fillMaxSize().padding(16.dp)) { Text("후보를 찾을 수 없습니다") }
+        Box(Modifier.fillMaxSize().padding(16.dp)) { Text("약속 후보를 찾을 수 없습니다") }
         return
     }
 
     Column(
         Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(FeedLoopColors.Background, FeedLoopColors.PrimaryLight.copy(alpha = 0.28f)),
-                ),
-            )
+            .background(Brush.verticalGradient(listOf(Color(0xFFF8FAFF), Color(0xFFFFFFFF))))
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text("약속 후보 정리", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Card(
-            Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Elevated),
-            border = BorderStroke(1.dp, FeedLoopColors.Border),
-            elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                BasketTextField(title, { title = it }, "제목")
-                BasketTextField(startAt, { startAt = it }, "시작 yyyy-MM-dd HH:mm")
-                BasketTextField(endAt, { endAt = it }, "종료 yyyy-MM-dd HH:mm")
-                BasketTextField(location, { location = it }, "장소")
-                StatusSelector(status = status, onStatus = { status = it })
-            }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(onClick = onBack) { Text("‹") }
+            Text("약속 후보 상세", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            TextButton(onClick = {}) { Text("⋮") }
         }
-        Text("원문", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Card(
-            Modifier.fillMaxWidth(),
-            colors = FeedLoopCardColors(),
-            border = BorderStroke(1.dp, FeedLoopColors.Border),
-            elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
-        ) {
-            Text(candidate!!.rawText, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(14.dp))
+
+        AssistChip(
+            onClick = {},
+            label = { Text(if (candidate!!.timeConfidence == "high") "확정 가능" else "정보 보완 필요") },
+            colors = AssistChipDefaults.assistChipColors(containerColor = FeedLoopColors.SuccessBg, labelColor = FeedLoopColors.Success),
+            border = AssistChipDefaults.assistChipBorder(enabled = true, borderColor = FeedLoopColors.SuccessBorder),
+        )
+
+        Text(title.ifBlank { "제목 입력 필요" }, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+
+        InfoBlock {
+            BasketTextField(title, { title = it }, "제목")
+            BasketTextField(startAt, { startAt = it }, "시작 yyyy-MM-dd HH:mm")
+            BasketTextField(endAt, { endAt = it }, "종료 yyyy-MM-dd HH:mm")
+            BasketTextField(location, { location = it }, "장소")
         }
-        Button(
-            onClick = {
-                scope.launch {
-                    repository.updateCandidate(candidateId, title, parseDateTimeOrNull(startAt), parseDateTimeOrNull(endAt), location)
-                    when (repository.saveFromCandidate(candidateId, status, title)) {
-                        is SaveResult.Conflict -> onConflict()
-                        else -> onDone()
+
+        Text("메모", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFF6F7FB)), border = BorderStroke(1.dp, FeedLoopColors.Border)) {
+            Text(candidate!!.rawText, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(14.dp), color = FeedLoopColors.Secondary)
+        }
+
+        Text("신뢰도", style = MaterialTheme.typography.labelLarge, color = FeedLoopColors.Secondary)
+        LinearProgressIndicator(progress = { candidate!!.confidence.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth(), color = FeedLoopColors.Success, trackColor = FeedLoopColors.BorderMuted)
+        Text("${(candidate!!.confidence * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = FeedLoopColors.Secondary)
+
+        StatusSelector(status = status, onStatus = { status = it })
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f), border = BorderStroke(1.dp, FeedLoopColors.Border)) { Text("수정 취소") }
+            Button(
+                onClick = {
+                    scope.launch {
+                        repository.updateCandidate(candidateId, title, parseDateTimeOrNull(startAt), parseDateTimeOrNull(endAt), location)
+                        when (repository.saveFromCandidate(candidateId, status, title)) {
+                            is SaveResult.Conflict -> onConflict()
+                            else -> onDone()
+                        }
                     }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = canSave,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = FeedLoopColors.Primary,
-                disabledContainerColor = FeedLoopColors.BorderMuted,
-                disabledContentColor = FeedLoopColors.TextMuted,
-            ),
-        ) { Text("저장") }
+                },
+                modifier = Modifier.weight(1.2f),
+                enabled = canSave,
+                colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
+            ) { Text("일정에 추가") }
+        }
+    }
+}
+
+@Composable
+private fun InfoBlock(content: @Composable ColumnScope.() -> Unit) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface), border = BorderStroke(1.dp, FeedLoopColors.Border), elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
 }
 
@@ -101,12 +114,8 @@ private fun BasketTextField(value: String, onValueChange: (String) -> Unit, labe
         onValueChange = onValueChange,
         label = { Text(label) },
         modifier = Modifier.fillMaxWidth(),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = FeedLoopColors.Primary,
-            unfocusedBorderColor = FeedLoopColors.Border,
-            focusedLabelColor = FeedLoopColors.PrimaryDark,
-            cursorColor = FeedLoopColors.PrimaryDark,
-        ),
+        singleLine = true,
+        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = FeedLoopColors.PrimaryDark, unfocusedBorderColor = FeedLoopColors.Border, focusedLabelColor = FeedLoopColors.PrimaryDark, cursorColor = FeedLoopColors.PrimaryDark),
     )
 }
 
@@ -114,41 +123,18 @@ private fun BasketTextField(value: String, onValueChange: (String) -> Unit, labe
 private fun StatusSelector(status: ScheduleStatus, onStatus: (ScheduleStatus) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         ScheduleStatus.entries.forEach {
-            val selectedColor = when (it) {
-                ScheduleStatus.Confirmed -> FeedLoopColors.Success
-                ScheduleStatus.Planned -> FeedLoopColors.Warning
-                ScheduleStatus.Uncertain -> FeedLoopColors.Pending
-            }
-            val selectedBg = when (it) {
-                ScheduleStatus.Confirmed -> FeedLoopColors.SuccessBg
-                ScheduleStatus.Planned -> FeedLoopColors.WarningBg
-                ScheduleStatus.Uncertain -> FeedLoopColors.PendingBg
-            }
             FilterChip(
                 selected = status == it,
                 onClick = { onStatus(it) },
-                label = {
-                    Text(
-                        when (it) {
-                            ScheduleStatus.Confirmed -> "confirmed"
-                            ScheduleStatus.Planned -> "planned"
-                            ScheduleStatus.Uncertain -> "uncertain"
-                        },
-                    )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = selectedBg,
-                    selectedLabelColor = selectedColor,
-                    labelColor = FeedLoopColors.Secondary,
-                    containerColor = FeedLoopColors.Surface,
-                ),
-                border = FilterChipDefaults.filterChipBorder(
-                    enabled = true,
-                    selected = status == it,
-                    borderColor = FeedLoopColors.Border,
-                    selectedBorderColor = selectedColor,
-                ),
+                label = { Text(statusLabel(it)) },
+                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = FeedLoopColors.PendingBg, selectedLabelColor = FeedLoopColors.Pending, containerColor = FeedLoopColors.Surface),
             )
         }
     }
+}
+
+fun statusLabel(status: ScheduleStatus): String = when (status) {
+    ScheduleStatus.Confirmed -> "확정"
+    ScheduleStatus.Planned -> "예정"
+    ScheduleStatus.Uncertain -> "보류"
 }

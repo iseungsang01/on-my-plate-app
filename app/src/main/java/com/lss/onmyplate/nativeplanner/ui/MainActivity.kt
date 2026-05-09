@@ -132,6 +132,7 @@ sealed interface Route {
     data object Sharing : Route
     data class Candidate(val candidateId: String) : Route
     data class Conflict(val candidateId: String) : Route
+    data class Complete(val candidateId: String) : Route
 }
 
 @Composable
@@ -151,14 +152,20 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit) {
         is Route.Candidate -> CandidateEditScreen(
             repository = app.repository,
             candidateId = route.candidateId,
-            onDone = { onRoute(Route.Planner) },
+            onDone = { onRoute(Route.Complete(route.candidateId)) },
             onConflict = { onRoute(Route.Conflict(route.candidateId)) },
+            onBack = { onRoute(Route.Planner) },
         )
         is Route.Conflict -> ConflictScreen(
             repository = app.repository,
             candidateId = route.candidateId,
             onEdit = { onRoute(Route.Candidate(route.candidateId)) },
-            onDone = { onRoute(Route.Planner) },
+            onDone = { onRoute(Route.Complete(route.candidateId)) },
+        )
+        is Route.Complete -> AppointmentAddedScreen(
+            repository = app.repository,
+            candidateId = route.candidateId,
+            onOpenPlanner = { onRoute(Route.Planner) },
         )
     }
 }
