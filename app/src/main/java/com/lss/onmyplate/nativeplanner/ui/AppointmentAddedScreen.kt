@@ -42,7 +42,7 @@ fun AppointmentAddedScreen(
             Text("✓", color = FeedLoopColors.Success, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
         }
         Text("일정에 추가했어요", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("약속이 7일 일정 노트와 홈 위젯에 반영됩니다.", color = FeedLoopColors.Secondary)
+        Text("약속이 일정 화면과 홈 위젯에 반영됩니다.", color = FeedLoopColors.Secondary)
 
         Card(
             Modifier.fillMaxWidth(),
@@ -59,7 +59,7 @@ fun AppointmentAddedScreen(
 
         Spacer(Modifier.weight(1f))
         OutlinedButton(onClick = onOpenPlanner, modifier = Modifier.fillMaxWidth(), border = BorderStroke(1.dp, FeedLoopColors.Border)) {
-            Text("7일 일정 보기")
+            Text("일정 보기")
         }
         Button(onClick = onOpenPlanner, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark)) {
             Text("확인")

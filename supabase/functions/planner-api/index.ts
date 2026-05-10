@@ -35,6 +35,7 @@ Deno.serve(async (request) => {
 
     if (method === "POST" && path === "/api/auth/signup") return await signUp(request);
     if (method === "POST" && path === "/api/auth/login") return await login(request);
+    if (method === "POST" && path === "/api/auth/password") return await changePassword(request);
 
     if (method === "POST" && path === "/api/planner/share/profile") {
       const userId = await requireUserId(request);
@@ -115,6 +116,28 @@ async function login(request: Request): Promise<Response> {
 
   await ensureProfile(credentials.id);
   return authResponse(credentials.id);
+}
+
+async function changePassword(request: Request): Promise<Response> {
+  const userId = await requireUserId(request);
+  const body = await readJson(request);
+  const currentPassword = requiredString(body.currentPassword, "현재 비밀번호를 입력하세요.");
+  const newPassword = requiredString(body.newPassword, "새 비밀번호를 입력하세요.");
+  if (newPassword.length < 6) throw apiError(400, "새 비밀번호는 6자 이상이어야 합니다.");
+
+  const { data: user, error } = await db
+    .from("planner_users")
+    .select("id,password_hash")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw apiError(500, error.message);
+  if (!user) throw apiError(401, "로그인이 필요합니다.");
+
+  const matches = await verifyPassword(userId, currentPassword, String(user.password_hash));
+  if (!matches) throw apiError(401, "현재 비밀번호가 올바르지 않습니다.");
+
+  await updatePasswordHash(userId, newPassword);
+  return jsonResponse({ ok: true });
 }
 
 async function createUserFromLogin(id: string, password: string): Promise<Response> {

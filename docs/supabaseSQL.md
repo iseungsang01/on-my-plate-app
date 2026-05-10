@@ -17,9 +17,7 @@ create table if not exists public.planner_profiles (
   public_id text not null unique,
   display_name text,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint planner_profiles_public_id_format
-    check (public_id ~ '^(omp|pb)-[A-Z0-9]{6,16}$')
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.planner_groups (

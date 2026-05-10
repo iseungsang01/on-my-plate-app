@@ -42,6 +42,12 @@ class AuthRepository(context: Context) {
     suspend fun login(identifier: String, password: String): AuthSession = authenticate("/api/auth/login", identifier, password)
     suspend fun signUp(identifier: String, password: String): AuthSession = authenticate("/api/auth/signup", identifier, password)
 
+    suspend fun changePassword(currentPassword: String, newPassword: String): Unit = withContext(Dispatchers.IO) {
+        check(client.isConfigured()) { "인증 API가 설정되지 않았습니다. PLANNER_API_BASE_URL을 확인하세요." }
+        val token = sessionToken() ?: error("로그인 세션이 필요합니다.")
+        client.changePassword(token, currentPassword, newPassword)
+    }
+
     private suspend fun authenticate(path: String, identifier: String, password: String): AuthSession = withContext(Dispatchers.IO) {
         check(client.isConfigured()) { "인증 API가 설정되지 않았습니다. PLANNER_API_BASE_URL을 확인하세요." }
         val session = client.authenticate(path, identifier.trim(), password)
@@ -79,7 +85,17 @@ private class PlannerAuthApiClient(private val rawBaseUrl: String) {
         )
     }
 
-    private fun request(method: String, path: String, body: JSONObject): String {
+    fun changePassword(sessionToken: String, currentPassword: String, newPassword: String) {
+        require(sessionToken.isNotBlank()) { "로그인 세션이 필요합니다." }
+        require(currentPassword.isNotBlank()) { "현재 비밀번호를 입력하세요." }
+        require(newPassword.isNotBlank()) { "새 비밀번호를 입력하세요." }
+        val body = JSONObject()
+            .put("currentPassword", currentPassword)
+            .put("newPassword", newPassword)
+        request("POST", "/api/auth/password", body, sessionToken)
+    }
+
+    private fun request(method: String, path: String, body: JSONObject, bearerToken: String? = null): String {
         require(isConfigured()) { "약속 바구니 API가 설정되지 않았습니다." }
         val connection = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
@@ -87,6 +103,9 @@ private class PlannerAuthApiClient(private val rawBaseUrl: String) {
             readTimeout = 15000
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Accept", "application/json")
+            if (!bearerToken.isNullOrBlank()) {
+                setRequestProperty("Authorization", "Bearer $bearerToken")
+            }
             doOutput = true
             outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
         }

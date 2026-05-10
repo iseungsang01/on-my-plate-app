@@ -219,6 +219,10 @@
 - `login(identifier, password)` / `signUp(identifier, password)`
   - `planner-api` Edge Function의 `/api/auth/login` 또는 `/api/auth/signup`에 id/password를 보내고, 응답 세션 토큰을 SharedPreferences에 저장합니다. 로그인은 서버에 사용자가 없으면 새 `planner_users` row를 만들고, 있으면 저장된 비밀번호 해시와 비교합니다.
 
+- `changePassword(currentPassword, newPassword)`
+  - 저장된 세션 토큰을 `Authorization` 헤더로 보내 `/api/auth/password`에 현재 비밀번호와 새 비밀번호를 제출합니다.
+  - 인증 API 설정과 로그인 세션이 없으면 오류를 반환하고, 성공 시 기존 세션은 유지합니다.
+
 - `enterGuestMode()`
   - 백엔드 계정 없이 앱을 열 수 있도록 로컬 게스트 모드 flag를 저장합니다.
 
@@ -441,14 +445,35 @@
 ### `ui/WeeklyScheduleScreen.kt`
 
 - `WeeklyScheduleScreen(repository, onOpenSchedule)`
-  - `observeSchedules()`를 구독해 오늘부터 7일간의 저장 일정을 날짜별 카드로 표시합니다.
-  - 각 일정 row는 시간, 제목, 장소/상태를 보여주며 클릭 시 저장 일정 수정 route를 호출합니다.
+  - `observeSchedules()`를 구독해 오늘부터 7일간의 저장 일정을 첫 화면의 시간표형 위젯과 하단 날짜별 카드로 표시합니다.
+  - 시간표 일정 블록과 각 일정 row는 클릭 시 저장 일정 수정 route를 호출합니다.
+
+- `WeeklyTimetableWidget(days, schedulesByDay, onOpenSchedule)`
+  - 7일 범위와 일정 개수를 보여주고, 요일 header와 시간표 body를 위젯형 카드로 렌더링합니다.
+
+- `TimetableHeader(days)`
+  - 시간표 상단의 7일 요일/날짜 header를 렌더링합니다.
+
+- `TimetableBody(days, schedulesByDay, onOpenSchedule)`
+  - 08:00-24:00 시간 grid, 빈 상태, 날짜별 일정 블록을 렌더링합니다.
+
+- `TimetableEventBlock(event, dayIndex, dayWidth, railWidth, bodyHeight, onOpenSchedule)`
+  - 저장 일정 1건을 시간 위치와 겹침 lane에 맞춰 클릭 가능한 시간표 블록으로 표시합니다.
 
 - `DayScheduleCard(day, schedules, onOpenSchedule)`
   - 하루 단위 일정 목록과 빈 상태 문구를 렌더링합니다.
 
 - `ScheduleSummaryRow(schedule, onClick)`
   - 저장 일정 1건의 시간, 제목, 장소/상태 요약을 표시합니다.
+
+- `buildTimetableEvents(day, schedules)`
+  - 하루 일정들을 시작 시간순으로 정렬하고 겹치는 일정이 나란히 보이도록 lane 정보를 계산합니다.
+
+- `ScheduleEntity.minuteOfDay()` / `ScheduleEntity.endMinuteOfDay(day)`
+  - 일정 시작/종료 시각을 시간표 배치용 분 단위 값으로 변환합니다.
+
+- `formatHourLabel(hour)` / `formatMinute(minute)` / `formatCompactRange(startMinute, endMinute)` / `formatCompactMinute(minute)` / `labelOffset(y, bodyHeight)`
+  - 시간표 축과 일정 블록에 표시할 시간 문자열 및 축 라벨 위치를 계산합니다.
 
 ### `ui/PlannerScreen.kt`
 
@@ -519,14 +544,14 @@
 - `AppointmentAddedScreen(repository, candidateId, onOpenPlanner)`
   - 일정 추가 완료 화면입니다.
   - 추가된 후보의 제목, 시간, 장소를 요약해 표시합니다.
-  - `7일 일정 보기`와 `확인` 버튼은 주간 일정 화면으로 이동합니다.
+  - `일정 보기`와 `확인` 버튼은 주간 일정 화면으로 이동합니다.
 
 ### `ui/SettingsScreen.kt`
 
 - `SettingsScreen(sharingRepository, authRepository, onLoggedOut)`
   - 세션/게스트 모드 여부, 캐시된 공유 ID, 공유 API 설정 상태, 앱 버전을 표시합니다.
+  - 로그인 세션과 인증 API가 있으면 현재 비밀번호 확인, 새 비밀번호, 새 비밀번호 확인 입력으로 비밀번호를 변경합니다.
   - 로그아웃 시 저장된 세션 토큰, 게스트 모드 flag, 공유 ID 캐시를 삭제하고 로그인 화면으로 이동합니다.
-  - 비밀번호 변경은 현재 Android 계정 API가 없어 안내/준비 액션만 제공합니다.
 
 - `SettingsCard(title, content)`
   - 설정 화면의 카드형 섹션을 렌더링합니다.
@@ -706,6 +731,10 @@
 - `login(request)`
   - 제출된 id가 없으면 `planner_users` 행을 즉시 만들고, 있으면 저장된 비밀번호 해시와 비교한 뒤 Android 인증 응답을 반환합니다.
   - 기존 평문 비밀번호 row는 로그인 성공 시 해시 값으로 교체합니다.
+
+- `changePassword(request)`
+  - `Authorization: Bearer <session-token>`에서 사용자 id를 읽고 현재 비밀번호가 저장된 해시와 일치하는지 검증합니다.
+  - 새 비밀번호가 6자 이상이면 PBKDF2-SHA256 해시로 `planner_users.password_hash`를 갱신합니다.
 
 - `profile(userId)`
   - 현재 로그인 사용자의 공유 프로필을 조회하거나 생성해 반환합니다.
