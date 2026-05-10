@@ -1,4 +1,4 @@
-# On My Plate Native Planner 함수별 명세
+# 약속 바구니 Native Planner 함수별 명세
 
 이 문서는 `SPECIFICATION.md`와 현재 `app/src/main/java/com/lss/onmyplate/nativeplanner` 구현을 기준으로, 주요 함수/메서드가 맡는 기능을 파일별로 정리한 문서입니다.
 
@@ -217,7 +217,7 @@
   - 로컬 게스트 모드 여부와 앱 진입 가능 여부를 반환합니다.
 
 - `login(identifier, password)` / `signUp(identifier, password)`
-  - `planner-api` Edge Function의 `/api/auth/login` 또는 `/api/auth/signup`에 id/password를 보내고, 응답 세션 토큰을 SharedPreferences에 저장합니다.
+  - `planner-api` Edge Function의 `/api/auth/login` 또는 `/api/auth/signup`에 id/password를 보내고, 응답 세션 토큰을 SharedPreferences에 저장합니다. 로그인은 서버에 사용자가 없으면 새 `planner_users` row를 만들고, 있으면 저장된 비밀번호 해시와 비교합니다.
 
 - `enterGuestMode()`
   - 백엔드 계정 없이 앱을 열 수 있도록 로컬 게스트 모드 flag를 저장합니다.
@@ -700,11 +700,12 @@
   - Edge Function URL에서 `/planner-api` prefix를 제거해 내부 route path로 정규화합니다.
 
 - `signUp(request)`
-  - id/password 요청을 읽어 `planner_users` 행을 만들고 `planner_profiles` 행을 보장합니다.
+  - id/password 요청을 읽어 user id로 salt 처리한 비밀번호 해시를 `planner_users`에 저장하고 `planner_profiles` 행을 보장합니다.
   - user id를 `sessionToken`과 `userId`로 반환합니다.
 
 - `login(request)`
-  - 제출된 id/password를 `planner_users`에 저장된 값과 비교하고 Android 인증 응답을 반환합니다.
+  - 제출된 id가 없으면 `planner_users` 행을 즉시 만들고, 있으면 저장된 비밀번호 해시와 비교한 뒤 Android 인증 응답을 반환합니다.
+  - 기존 평문 비밀번호 row는 로그인 성공 시 해시 값으로 교체합니다.
 
 - `profile(userId)`
   - 현재 로그인 사용자의 공유 프로필을 조회하거나 생성해 반환합니다.

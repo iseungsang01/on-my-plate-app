@@ -1,4 +1,4 @@
-# On My Plate Native Planner
+# 약속 바구니 Native Planner
 
 공유된 텍스트에서 일정 후보를 만들고, 사용자가 제목을 입력해 확정하는 네이티브 Android Kotlin MVP입니다.
 
@@ -23,7 +23,7 @@
 8. 후보 일정이 기존 일정과 겹치면, 사용자가 강제로 추가하기 전까지 충돌 알림/화면을 먼저 보여 줍니다.
 9. 저장된 일정은 Room에 로컬 저장되며 네이티브 홈 화면 위젯 스냅샷으로 동기화됩니다.
 
-파일 단위 구현 지도는 `SPECIFICATION.ko.md`를 참고하세요. 영문 원문은 `README.md`와 `SPECIFICATION.md`에 있습니다.
+파일 단위 구현 지도는 `docs/SPECIFICATION.ko.md`를 참고하세요. 영문 원문은 `README.md`와 `docs/SPECIFICATION.md`에 있습니다.
 
 ## 실행
 
@@ -45,7 +45,7 @@ Unix 계열 셸에서는 다음을 사용합니다.
 
 `gradlew`와 `gradlew.bat`는 Gradle Wrapper의 표준 루트 실행 스크립트입니다. 실제 wrapper 바이너리와 설정은 `gradle/wrapper/` 폴더에 정리되어 있으며, 스크립트를 다른 폴더로 옮기면 Android Studio와 배포 명령이 깨질 수 있습니다.
 
-앱은 Android `ACTION_SEND` 대상에 `text/plain`으로 등록됩니다. 카카오톡, SMS, 메모 앱, 브라우저 등에서 텍스트를 `On My Plate Planner`로 공유하면 공유 수신기가 시간/장소 정보를 파싱하고, 제목이 비어 있는 일정 후보를 만든 뒤, 인라인 제목 입력과 액션이 있는 네이티브 알림을 표시합니다.
+앱은 Android `ACTION_SEND` 대상에 `text/plain`으로 등록됩니다. 카카오톡, SMS, 메모 앱, 브라우저 등에서 텍스트를 `약속 바구니`로 공유하면 공유 수신기가 시간/장소 정보를 파싱하고, 제목이 비어 있는 일정 후보를 만든 뒤, 인라인 제목 입력과 액션이 있는 네이티브 알림을 표시합니다.
 
 ## MVP 범위
 
@@ -79,6 +79,6 @@ Unix 계열 셸에서는 다음을 사용합니다.
 
 ## Supabase Edge Function planner API
 
-The Android app uses a single Supabase Edge Function, `planner-api`, for app login, schedule sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` or CI as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` uses the app's own `planner_users` rows, returns the user id as the app session token, and then writes to Supabase with server-only service-role credentials.
+Android 앱은 앱 로그인, 일정 동기화, 공유에 단일 Supabase Edge Function `planner-api`를 사용합니다. `.env` 또는 CI에서 `PLANNER_API_BASE_URL`을 `https://<project-ref>.supabase.co/functions/v1/planner-api`로 설정합니다. Supabase Auth는 사용하지 않습니다. `planner-api`는 첫 로그인 때 자체 `planner_users` row를 만들고, 비밀번호는 user id로 salt 처리한 해시만 저장하며, user id를 앱 세션 토큰으로 반환한 뒤 서버 전용 service-role 권한으로 Supabase에 씁니다.
 
-Android never stores service-role credentials and no longer depends on any PC-local backend. Shared-screen-only dummy schedules are read from `planner_dummy_schedules` through the API and are never stored in Room or the widget. See `supabaseSQL.md` for the server-side schema and RLS posture.
+Android never stores service-role credentials and no longer depends on any PC-local backend. Shared-screen-only dummy schedules are read from `planner_dummy_schedules` through the API and are never stored in Room or the widget. See `docs/supabaseSQL.md` for the server-side schema and RLS posture.

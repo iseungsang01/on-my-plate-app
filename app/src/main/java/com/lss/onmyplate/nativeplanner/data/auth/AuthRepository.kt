@@ -80,7 +80,7 @@ private class PlannerAuthApiClient(private val rawBaseUrl: String) {
     }
 
     private fun request(method: String, path: String, body: JSONObject): String {
-        require(isConfigured()) { "Planner API is not configured." }
+        require(isConfigured()) { "약속 바구니 API가 설정되지 않았습니다." }
         val connection = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 15000

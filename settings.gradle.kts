@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "OnMyPlateNative"
+rootProject.name = "PromiseBasketNative"
 include(":app")

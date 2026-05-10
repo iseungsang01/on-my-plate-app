@@ -1,4 +1,4 @@
-# On My Plate Native Planner 사양
+# 약속 바구니 Native Planner 사양
 
 이 문서는 현재 네이티브 Android 구현을 설명합니다. 코드 변경 전에 각 동작이 어디에 있는지 파악하기 위한 코드 중심 문서입니다.
 
@@ -249,7 +249,7 @@
 - Sharing is opt-in from the planner screen. Android calls the Supabase Edge Function `planner-api` configured by `PLANNER_API_BASE_URL`.
 - Android reads the existing app login token from SharedPreferences and sends it as `Authorization: Bearer <token>`. Defaults: `PLANNER_SESSION_PREFS_NAME=planner_auth`, `PLANNER_SESSION_TOKEN_KEY=session_token`.
 - Android does not create anonymous Supabase Auth sessions, store Supabase access/refresh tokens, or write directly to Supabase PostgREST tables.
-- The `planner-api` Edge Function treats the existing app session token as the user id, checks group membership/ownership with that id, and performs Supabase DB work with server-only credentials.
+- `planner-api` Edge Function은 앱 세션 토큰을 user id로 취급하고, 첫 로그인 때 `planner_users` row를 만들며, 비밀번호는 user id로 salt 처리한 해시만 저장하고, 해당 id로 그룹 멤버십/소유권을 검사한 뒤 서버 전용 credentials로 Supabase DB 작업을 수행합니다.
 - Entering a partner `public_id` asks `planner-api` to create or reuse a group and return accessible groups/schedules.
 - Only selected local schedules are uploaded to `planner-api`; they remain independent copies of Room rows.
 - Shared-screen-only dummy schedules are read through the API but are never inserted into Room, conflict detection, notifications, or widget snapshots.

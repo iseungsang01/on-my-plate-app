@@ -65,9 +65,9 @@ fun LoginScreen(authRepository: AuthRepository, onAuthenticated: () -> Unit) {
             elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
         ) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("온마이플레이트", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("약속 바구니", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(
-                    if (isSignUp) "아이디와 비밀번호로 계정을 만들고 시작하세요." else "계정이 있으면 아이디와 비밀번호로 로그인하세요.",
+                    if (isSignUp) "아이디와 비밀번호로 계정을 만들고 시작하세요." else "처음 로그인하면 계정이 자동 생성됩니다.",
                     color = FeedLoopColors.Secondary,
                 )
 

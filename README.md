@@ -1,4 +1,4 @@
-# On My Plate Native Planner
+# 약속 바구니 Native Planner
 
 Native Android Kotlin MVP for shared-text appointment ingestion.
 
@@ -23,7 +23,7 @@ The app turns shared text into a schedule candidate, but it does not decide the 
 8. If the candidate overlaps an existing schedule, the app shows a conflict notification/screen before saving unless the user explicitly forces the add.
 9. Saved schedules are stored locally in Room and synced into the native home-screen widget snapshot.
 
-See `SPECIFICATION.md` for the file-level implementation map.
+See `docs/SPECIFICATION.md` for the file-level implementation map.
 
 ## Run
 
@@ -43,7 +43,7 @@ On Unix-like shells:
 ./gradlew :app:assembleDebug
 ```
 
-The app registers an Android `ACTION_SEND` target for `text/plain`. Share text from KakaoTalk, SMS, memo apps, browsers, or any Android app into `On My Plate Planner`; the share receiver parses time/location details, creates an appointment candidate with an empty title, and shows a native notification with inline title input and actions.
+The app registers an Android `ACTION_SEND` target for `text/plain`. Share text from KakaoTalk, SMS, memo apps, browsers, or any Android app into `약속 바구니`; the share receiver parses time/location details, creates an appointment candidate with an empty title, and shows a native notification with inline title input and actions.
 
 ## MVP Scope
 
@@ -77,6 +77,6 @@ The native Android widget is part of this MVP and renders only Room-backed sched
 
 ## Supabase Edge Function planner API
 
-The Android app uses a single Supabase Edge Function, `planner-api`, for app login, schedule sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` (or CI env) as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` uses the app's own `planner_users` rows, returns the user id as the app session token, and then writes to Supabase with server-only service-role credentials.
+The Android app uses a single Supabase Edge Function, `planner-api`, for app login, schedule sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` (or CI env) as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` uses the app's own `planner_users` rows, creates a user row on first login, stores only a user-id salted password hash, returns the user id as the app session token, and then writes to Supabase with server-only service-role credentials.
 
-The Android app never stores service-role credentials and no longer depends on any PC-local backend. Shared-screen-only fake entries live in `planner_dummy_schedules` and are never copied into Room or the home widget. See `supabaseSQL.md` for the server-side schema and RLS posture.
+The Android app never stores service-role credentials and no longer depends on any PC-local backend. Shared-screen-only fake entries live in `planner_dummy_schedules` and are never copied into Room or the home widget. See `docs/supabaseSQL.md` for the server-side schema and RLS posture.

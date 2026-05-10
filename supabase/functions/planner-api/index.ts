@@ -6,6 +6,10 @@ type JsonObject = { [key: string]: JsonValue };
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const FUNCTION_NAME = "planner-api";
+const PASSWORD_HASH_PREFIX = "pbkdf2-sha256$v1$";
+const LEGACY_SHA256_HASH_PREFIX = "sha256$v1$";
+const PASSWORD_HASH_ITERATIONS = 120_000;
+const PUBLIC_ID_PREFIX = "pb";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -22,7 +26,7 @@ Deno.serve(async (request) => {
 
   try {
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      return errorResponse(500, "Supabase Edge Function environment is not configured.");
+      return errorResponse(500, "Supabase Edge Function 환경 변수가 설정되지 않았습니다.");
     }
 
     const url = new URL(request.url);
@@ -59,7 +63,7 @@ Deno.serve(async (request) => {
       return await uploadPersonalSchedule(userId, request);
     }
 
-    return errorResponse(404, "Planner API route not found.");
+    return errorResponse(404, "약속 바구니 API 경로를 찾을 수 없습니다.");
   } catch (error) {
     const apiError = toApiError(error);
     return errorResponse(apiError.status, apiError.message);
@@ -74,40 +78,136 @@ function normalizePath(pathname: string): string {
 }
 
 async function signUp(request: Request): Promise<Response> {
-  const body = await readJson(request);
-  const id = normalizeIdentifier(body.id);
-  const password = requiredString(body.password, "비밀번호를 입력하세요.");
-  if (password.length < 6) throw apiError(400, "비밀번호는 6자 이상이어야 합니다.");
-
+  const credentials = await readCredentials(request);
+  const passwordHash = await hashPassword(credentials.id, credentials.password);
   const { error } = await db.from("planner_users").insert({
-    id,
-    password_hash: password,
+    id: credentials.id,
+    password_hash: passwordHash,
   });
   if (error?.code === "23505") throw apiError(409, "이미 사용 중인 아이디입니다.");
   if (error) throw apiError(500, error.message);
 
-  await ensureProfile(id);
-  return jsonResponse({ sessionToken: id, userId: id });
+  await ensureProfile(credentials.id);
+  return authResponse(credentials.id);
 }
 
 async function login(request: Request): Promise<Response> {
-  const body = await readJson(request);
-  const id = normalizeIdentifier(body.id);
-  const password = requiredString(body.password, "비밀번호를 입력하세요.");
-
+  const credentials = await readCredentials(request);
   const { data: user, error } = await db
     .from("planner_users")
     .select("id,password_hash")
-    .eq("id", id)
+    .eq("id", credentials.id)
     .maybeSingle();
   if (error) throw apiError(500, error.message);
-  if (!user) throw apiError(401, "아이디 또는 비밀번호가 올바르지 않습니다.");
 
-  if (password !== user.password_hash) {
+  if (!user) {
+    return await createUserFromLogin(credentials.id, credentials.password);
+  }
+
+  const matches = await verifyPassword(credentials.id, credentials.password, String(user.password_hash));
+  if (!matches) {
     throw apiError(401, "아이디 또는 비밀번호가 올바르지 않습니다.");
   }
 
+  if (!isPasswordHash(String(user.password_hash))) {
+    await updatePasswordHash(credentials.id, credentials.password);
+  }
+
+  await ensureProfile(credentials.id);
+  return authResponse(credentials.id);
+}
+
+async function createUserFromLogin(id: string, password: string): Promise<Response> {
+  const passwordHash = await hashPassword(id, password);
+  const { error } = await db.from("planner_users").insert({ id, password_hash: passwordHash });
+  if (error?.code === "23505") {
+    const retryRequest = new Request("http://local/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ id, password }),
+    });
+    return await login(retryRequest);
+  }
+  if (error) throw apiError(500, error.message);
+
   await ensureProfile(id);
+  return authResponse(id);
+}
+
+async function readCredentials(request: Request): Promise<{ id: string; password: string }> {
+  const body = await readJson(request);
+  const id = normalizeIdentifier(body.id);
+  const password = requiredString(body.password, "비밀번호를 입력하세요.");
+  if (password.length < 6) throw apiError(400, "비밀번호는 6자 이상이어야 합니다.");
+  return { id, password };
+}
+
+async function hashPassword(id: string, password: string): Promise<string> {
+  return await hashPasswordWithIterations(id, password, PASSWORD_HASH_ITERATIONS);
+}
+
+async function hashPasswordWithIterations(id: string, password: string, iterations: number): Promise<string> {
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      hash: "SHA-256",
+      salt: encoder.encode(`planner-user:${id}`),
+      iterations,
+    },
+    keyMaterial,
+    256,
+  );
+  return `${PASSWORD_HASH_PREFIX}${iterations}$${toHex(bits)}`;
+}
+
+async function legacySha256HashPassword(id: string, password: string): Promise<string> {
+  const bytes = new TextEncoder().encode(`${id}:${password}`);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return `${LEGACY_SHA256_HASH_PREFIX}${toHex(digest)}`;
+}
+
+function isPasswordHash(value: string): boolean {
+  return value.startsWith(PASSWORD_HASH_PREFIX) || value.startsWith(LEGACY_SHA256_HASH_PREFIX);
+}
+
+async function verifyPassword(id: string, password: string, storedPasswordHash: string): Promise<boolean> {
+  if (storedPasswordHash.startsWith(PASSWORD_HASH_PREFIX)) {
+    const [rawIterations] = storedPasswordHash.slice(PASSWORD_HASH_PREFIX.length).split("$");
+    const iterations = Number(rawIterations);
+    if (!Number.isInteger(iterations) || iterations < 1) return false;
+    return (await hashPasswordWithIterations(id, password, iterations)) === storedPasswordHash;
+  }
+  if (storedPasswordHash.startsWith(LEGACY_SHA256_HASH_PREFIX)) {
+    return (await legacySha256HashPassword(id, password)) === storedPasswordHash;
+  }
+  if (!isPasswordHash(storedPasswordHash)) {
+    return password === storedPasswordHash;
+  }
+  return false;
+}
+
+async function updatePasswordHash(id: string, password: string): Promise<void> {
+  const { error } = await db
+    .from("planner_users")
+    .update({ password_hash: await hashPassword(id, password), updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw apiError(500, error.message);
+}
+
+function toHex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function authResponse(id: string): Response {
   return jsonResponse({ sessionToken: id, userId: id });
 }
 
@@ -220,7 +320,7 @@ async function ensureProfile(userId: string): Promise<{ user_id: string; public_
   if (existing) return existing;
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const publicId = `omp-${crypto.randomUUID().replace(/-/g, "").toUpperCase().slice(0, 10)}`;
+    const publicId = `${PUBLIC_ID_PREFIX}-${crypto.randomUUID().replace(/-/g, "").toUpperCase().slice(0, 10)}`;
     const { data, error } = await db
       .from("planner_profiles")
       .insert({ user_id: userId, public_id: publicId, display_name: userId })
@@ -380,5 +480,5 @@ function toApiError(error: unknown): { status: number; message: string } {
   if (error instanceof Error && "status" in error && typeof error.status === "number") {
     return { status: error.status, message: error.message };
   }
-  return { status: 500, message: error instanceof Error ? error.message : "Planner API request failed." };
+  return { status: 500, message: error instanceof Error ? error.message : "약속 바구니 API 요청이 실패했습니다." };
 }
