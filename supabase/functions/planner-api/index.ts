@@ -5,8 +5,6 @@ type JsonObject = { [key: string]: JsonValue };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const PASSWORD_ITERATIONS = 210_000;
-const SESSION_DAYS = 30;
 const FUNCTION_NAME = "planner-api";
 
 const corsHeaders = {
@@ -81,20 +79,15 @@ async function signUp(request: Request): Promise<Response> {
   const password = requiredString(body.password, "비밀번호를 입력하세요.");
   if (password.length < 6) throw apiError(400, "비밀번호는 6자 이상이어야 합니다.");
 
-  const salt = randomBase64Url(16);
-  const passwordHash = await hashPassword(password, salt, PASSWORD_ITERATIONS);
   const { error } = await db.from("planner_users").insert({
     id,
-    password_hash: passwordHash,
-    password_salt: salt,
-    password_iterations: PASSWORD_ITERATIONS,
+    password_hash: password,
   });
   if (error?.code === "23505") throw apiError(409, "이미 사용 중인 아이디입니다.");
   if (error) throw apiError(500, error.message);
 
   await ensureProfile(id);
-  const sessionToken = await createSession(id);
-  return jsonResponse({ sessionToken, userId: id });
+  return jsonResponse({ sessionToken: id, userId: id });
 }
 
 async function login(request: Request): Promise<Response> {
@@ -104,20 +97,18 @@ async function login(request: Request): Promise<Response> {
 
   const { data: user, error } = await db
     .from("planner_users")
-    .select("id,password_hash,password_salt,password_iterations")
+    .select("id,password_hash")
     .eq("id", id)
     .maybeSingle();
   if (error) throw apiError(500, error.message);
   if (!user) throw apiError(401, "아이디 또는 비밀번호가 올바르지 않습니다.");
 
-  const candidateHash = await hashPassword(password, user.password_salt, user.password_iterations);
-  if (!timingSafeEqual(candidateHash, user.password_hash)) {
+  if (password !== user.password_hash) {
     throw apiError(401, "아이디 또는 비밀번호가 올바르지 않습니다.");
   }
 
   await ensureProfile(id);
-  const sessionToken = await createSession(id);
-  return jsonResponse({ sessionToken, userId: id });
+  return jsonResponse({ sessionToken: id, userId: id });
 }
 
 async function profile(userId: string): Promise<Response> {
@@ -229,7 +220,7 @@ async function ensureProfile(userId: string): Promise<{ user_id: string; public_
   if (existing) return existing;
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const publicId = `omp-${randomBase64Url(8).replace(/[-_]/g, "").toUpperCase().slice(0, 10)}`;
+    const publicId = `omp-${crypto.randomUUID().replace(/-/g, "").toUpperCase().slice(0, 10)}`;
     const { data, error } = await db
       .from("planner_profiles")
       .insert({ user_id: userId, public_id: publicId, display_name: userId })
@@ -299,32 +290,10 @@ async function requireGroupMember(userId: string, groupId: string): Promise<void
 }
 
 async function requireUserId(request: Request): Promise<string> {
-  const token = bearerToken(request);
-  const tokenHash = await sha256Base64Url(token);
-  const now = new Date().toISOString();
-  const { data: session, error } = await db
-    .from("planner_sessions")
-    .select("user_id,expires_at")
-    .eq("token_hash", tokenHash)
-    .gt("expires_at", now)
-    .maybeSingle();
-  if (error) throw apiError(500, error.message);
-  if (!session) throw apiError(401, "로그인이 필요합니다.");
-  await db.from("planner_sessions").update({ last_used_at: now }).eq("token_hash", tokenHash);
-  return session.user_id;
-}
-
-async function createSession(userId: string): Promise<string> {
-  const token = `${crypto.randomUUID()}.${randomBase64Url(32)}`;
-  const tokenHash = await sha256Base64Url(token);
-  const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const { error } = await db.from("planner_sessions").insert({
-    token_hash: tokenHash,
-    user_id: userId,
-    expires_at: expiresAt,
-  });
-  if (error) throw apiError(500, error.message);
-  return token;
+  const header = request.headers.get("authorization") ?? "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) throw apiError(401, "로그인이 필요합니다.");
+  return normalizeIdentifier(match[1].trim());
 }
 
 async function readScheduleJson(request: Request): Promise<JsonObject> {
@@ -372,55 +341,6 @@ function optionalString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length === 0 || trimmed === "null" ? null : value;
-}
-
-function bearerToken(request: Request): string {
-  const header = request.headers.get("authorization") ?? "";
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match) throw apiError(401, "로그인이 필요합니다.");
-  return match[1].trim();
-}
-
-async function hashPassword(password: string, saltBase64Url: string, iterations: number): Promise<string> {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt: base64UrlToBytes(saltBase64Url), iterations },
-    key,
-    256,
-  );
-  return bytesToBase64Url(new Uint8Array(bits));
-}
-
-async function sha256Base64Url(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return bytesToBase64Url(new Uint8Array(digest));
-}
-
-function randomBase64Url(byteCount: number): string {
-  const bytes = new Uint8Array(byteCount);
-  crypto.getRandomValues(bytes);
-  return bytesToBase64Url(bytes);
-}
-
-function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function base64UrlToBytes(value: string): Uint8Array {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
-  const binary = atob(padded);
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-}
-
-function timingSafeEqual(left: string, right: string): boolean {
-  const leftBytes = new TextEncoder().encode(left);
-  const rightBytes = new TextEncoder().encode(right);
-  if (leftBytes.length !== rightBytes.length) return false;
-  let diff = 0;
-  for (let index = 0; index < leftBytes.length; index += 1) diff |= leftBytes[index] ^ rightBytes[index];
-  return diff === 0;
 }
 
 function toGroupJson(group: { id: string; name: string }): JsonObject {

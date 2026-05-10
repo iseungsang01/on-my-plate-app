@@ -21,6 +21,10 @@
   - 알림 채널을 생성합니다.
   - 저장된 일정 목록을 관찰하다가 변경될 때마다 `PlannerWidgetSync.saveSnapshot`을 호출해 홈 위젯 데이터를 갱신합니다.
 
+- `syncScheduleAsync(schedule)`
+  - 공유/planner API가 설정되어 있고 앱 세션 토큰이 있으면 저장 일정을 개인 일정 API로 비동기 업로드합니다.
+  - 네트워크 동기화 실패가 로컬 저장/수정 동작을 되돌리지 않도록 실패를 내부에서 처리합니다.
+
 ---
 
 ## 공유 입력
@@ -178,8 +182,14 @@
 - `observeAll()`
   - 모든 저장 일정을 시작 시각 오름차순 `Flow`로 제공합니다.
 
+- `observe(id)`
+  - 저장 일정 ID로 일정 1건을 `Flow`로 관찰합니다.
+
 - `getAll()`
   - 모든 저장 일정을 시작 시각 오름차순으로 한 번 조회합니다.
+
+- `get(id)`
+  - 저장 일정 ID로 일정 1건을 suspend 조회합니다.
 
 - `findConflicts(newStart, newEnd)`
   - SQL 구간 겹침 조건으로 새 일정과 충돌하는 기존 일정을 조회합니다.
@@ -195,6 +205,26 @@
 
 ## Repository
 
+### `data/auth/AuthRepository.kt`
+
+- `isConfigured()`
+  - `PLANNER_API_BASE_URL` 기반 planner API 호출이 가능한지 반환합니다.
+
+- `hasSession()` / `sessionToken()`
+  - SharedPreferences에 저장된 앱 세션 토큰 존재 여부와 값을 반환합니다.
+
+- `isGuestMode()` / `hasAppAccess()`
+  - 로컬 게스트 모드 여부와 앱 진입 가능 여부를 반환합니다.
+
+- `login(identifier, password)` / `signUp(identifier, password)`
+  - `planner-api` Edge Function의 `/api/auth/login` 또는 `/api/auth/signup`에 id/password를 보내고, 응답 세션 토큰을 SharedPreferences에 저장합니다.
+
+- `enterGuestMode()`
+  - 백엔드 계정 없이 앱을 열 수 있도록 로컬 게스트 모드 flag를 저장합니다.
+
+- `clearSession()` / `clearAccess()`
+  - 저장된 세션 토큰 또는 세션/게스트 접근 상태를 삭제합니다.
+
 ### `data/supabase/SharingRepository.kt`
 
 - `isConfigured()`
@@ -202,6 +232,12 @@
 
 - `cachedPublicId()`
   - Returns the cached `public_id` last received from the share API.
+
+- `hasCachedSession()`
+  - 설정 화면에서 앱 세션 토큰 존재 여부를 표시할 때 사용합니다.
+
+- `clearAccountCache()`
+  - 설정 화면 로그아웃 동작으로 세션 토큰과 공유 ID 캐시를 삭제합니다.
 
 - `ensureProfile()`
   - Reads the existing app login token from SharedPreferences and calls `POST /api/planner/share/profile` on the `planner-api` Edge Function.
@@ -216,6 +252,9 @@
 - `uploadSchedule(groupId, schedule)`
   - Converts one selected Room schedule to the API contract's camelCase JSON and uploads it with `POST /api/planner/share/groups/{groupId}/schedules`.
 
+- `uploadPersonalSchedule(schedule)`
+  - 저장 일정 1건을 `POST /api/planner/schedules`에 업로드해 로그인 계정의 개인 일정으로 동기화합니다.
+
 - `listSharedSchedules(groupId, includeDummy)`
   - Calls `GET /api/planner/share/groups/{groupId}/schedules?includeDummy=...` and returns schedules sorted by start time.
 
@@ -227,6 +266,9 @@
 
 - `observeSchedules()`
   - UI와 위젯 동기화가 사용할 저장 일정 목록 `Flow`를 반환합니다.
+
+- `observeSchedule(id)` / `getSchedule(id)`
+  - 저장 일정 편집 화면에서 사용할 일정 1건을 관찰하거나 조회합니다.
 
 - `observePendingCandidates()`
   - 플래너 화면에 표시할 미처리 후보 목록 `Flow`를 반환합니다.
@@ -260,6 +302,11 @@
 - `updateCandidate(candidateId, title, startAt, endAt, location)`
   - 사용자가 편집 화면에서 입력한 제목/시작/종료/장소 값을 후보에 반영합니다.
   - 제목은 trim하고, 장소 blank는 null로 저장합니다.
+
+- `updateSchedule(scheduleId, title, startAt, endAt, location, memo, status)`
+  - 저장된 최종 일정을 수정합니다.
+  - 제목은 blank일 수 없고, 시작 시각 입력이 null이면 기존 시작 시각을 유지합니다.
+  - 장소/메모 blank는 null로 저장하며 `updatedAt`을 현재 시각으로 갱신합니다.
 
 - `discardCandidate(candidateId)`
   - 후보가 존재하고 아직 `pending`이면 `discarded`로 표시합니다.
@@ -371,7 +418,7 @@
   - 개발자 트리거 업데이트가 진행 중이면 update flow를 다시 시작합니다.
 
 - `startRoute(intent)`
-  - intent extra를 읽어 `Planner`, `Candidate`, `Conflict` route 중 하나로 변환합니다.
+  - intent extra를 읽어 기본 일정 화면, 후보 편집, 충돌 해결 route 중 하나로 변환합니다.
 
 - `candidateIntent(context, candidateId)`
   - 후보 편집 화면으로 이동하는 deep link intent를 생성합니다.
@@ -382,6 +429,26 @@
 - `AppRoot(route, onRoute)`
   - 현재 route에 따라 로그인, 주간 일정, 후보 바구니, 공유, 설정, 일정 편집, 후보 편집, 충돌 해결, 추가 완료 화면 중 하나를 표시합니다.
   - 메인 탭 route는 `MascotScaffold`로 감싸고, 후보 저장 완료 후에는 `Route.Complete(candidateId)`로 이동합니다.
+
+### `ui/LoginScreen.kt`
+
+- `LoginScreen(authRepository, onAuthenticated)`
+  - 저장된 세션 토큰이나 게스트 모드 flag가 없을 때 로그인/가입/게스트 진입 화면을 표시합니다.
+  - id와 password를 받아 `AuthRepository.login` 또는 `AuthRepository.signUp`을 호출합니다.
+  - 가입 모드에서는 비밀번호 확인을 검증하고, 성공하면 메인 일정 화면으로 이동합니다.
+  - API 미설정, 인증 실패, 입력 검증 오류를 한국어 메시지로 표시합니다.
+
+### `ui/WeeklyScheduleScreen.kt`
+
+- `WeeklyScheduleScreen(repository, onOpenSchedule)`
+  - `observeSchedules()`를 구독해 오늘부터 7일간의 저장 일정을 날짜별 카드로 표시합니다.
+  - 각 일정 row는 시간, 제목, 장소/상태를 보여주며 클릭 시 저장 일정 수정 route를 호출합니다.
+
+- `DayScheduleCard(day, schedules, onOpenSchedule)`
+  - 하루 단위 일정 목록과 빈 상태 문구를 렌더링합니다.
+
+- `ScheduleSummaryRow(schedule, onClick)`
+  - 저장 일정 1건의 시간, 제목, 장소/상태 요약을 표시합니다.
 
 ### `ui/PlannerScreen.kt`
 
@@ -395,6 +462,19 @@
 - `CandidateBasketCard(candidate, onClick, modifier)`
   - 후보 카드 클릭 시 후보 상세 편집 화면을 엽니다.
   - 제목과 시작 시간이 있으면 `확정 가능`, 부족하면 `수정 필요` chip과 success/warning accent를 표시합니다.
+
+### `ui/ScheduleEditScreen.kt`
+
+- `ScheduleEditScreen(repository, scheduleId, onBack)`
+  - `observeSchedule(scheduleId)`로 저장 일정 1건을 관찰합니다.
+  - 제목, 시작/종료 시각, 장소, 메모, 상태를 편집합니다.
+  - 제목과 시작 시각이 유효할 때 `PlannerRepository.updateSchedule`로 저장하고 일정 화면으로 돌아갑니다.
+
+- `PlannerTextField(value, onValueChange, label, required)`
+  - 저장 일정 편집 화면의 공통 텍스트 입력 필드를 렌더링합니다.
+
+- `scheduleStatusFromDb(value)` / `statusDbLabel(value)`
+  - DB status 문자열과 UI `ScheduleStatus`/라벨을 상호 변환합니다.
 
 ### `ui/SharingScreen.kt`
 
@@ -440,6 +520,25 @@
   - 일정 추가 완료 화면입니다.
   - 추가된 후보의 제목, 시간, 장소를 요약해 표시합니다.
   - `7일 일정 보기`와 `확인` 버튼은 주간 일정 화면으로 이동합니다.
+
+### `ui/SettingsScreen.kt`
+
+- `SettingsScreen(sharingRepository, authRepository, onLoggedOut)`
+  - 세션/게스트 모드 여부, 캐시된 공유 ID, 공유 API 설정 상태, 앱 버전을 표시합니다.
+  - 로그아웃 시 저장된 세션 토큰, 게스트 모드 flag, 공유 ID 캐시를 삭제하고 로그인 화면으로 이동합니다.
+  - 비밀번호 변경은 현재 Android 계정 API가 없어 안내/준비 액션만 제공합니다.
+
+- `SettingsCard(title, content)`
+  - 설정 화면의 카드형 섹션을 렌더링합니다.
+
+- `SettingLine(label, value)`
+  - 설정 항목의 라벨과 값을 한 줄로 표시합니다.
+
+### `ui/DateTimePickerField.kt`
+
+- `DateTimePickerField(value, onValueChange, label, required)`
+  - 날짜/시간 값을 읽기 전용 필드로 표시하고 탭하면 Android `DatePickerDialog`와 `TimePickerDialog`를 순서대로 엽니다.
+  - 선택한 날짜/시간을 epoch milliseconds로 변환해 상위 상태에 전달하며, 선택 값이 없는 선택 항목은 비울 수 있습니다.
 
 ### `ui/UiFormat.kt`
 
@@ -593,6 +692,52 @@
 
 ---
 
+## Supabase Edge Function
+
+### `supabase/functions/planner-api/index.ts`
+
+- `normalizePath(pathname)`
+  - Edge Function URL에서 `/planner-api` prefix를 제거해 내부 route path로 정규화합니다.
+
+- `signUp(request)`
+  - id/password 요청을 읽어 `planner_users` 행을 만들고 `planner_profiles` 행을 보장합니다.
+  - user id를 `sessionToken`과 `userId`로 반환합니다.
+
+- `login(request)`
+  - 제출된 id/password를 `planner_users`에 저장된 값과 비교하고 Android 인증 응답을 반환합니다.
+
+- `profile(userId)`
+  - 현재 로그인 사용자의 공유 프로필을 조회하거나 생성해 반환합니다.
+
+- `createGroup(userId, request)` / `listGroups(userId)`
+  - 공유 ID로 상대 사용자를 찾아 그룹을 만들거나 현재 사용자가 속한 공유 그룹 목록을 반환합니다.
+
+- `uploadSharedSchedule(userId, groupId, request)` / `listSharedSchedules(userId, groupId, includeDummy)`
+  - 그룹 멤버 권한을 확인한 뒤 공유 일정 업로드와 조회를 처리합니다.
+
+- `uploadPersonalSchedule(userId, request)`
+  - 로그인 사용자의 개인 일정 row를 `planner_personal_schedules`에 upsert합니다.
+
+- `ensureProfile(userId)` / `findExistingGroup(userId, partnerUserId)` / `groupsForUser(userId)`
+  - 프로필, 기존 그룹, 사용자별 그룹 목록을 조회하는 database helper입니다.
+
+- `requireGroupMember(userId, groupId)` / `requireUserId(request)`
+  - 공유 그룹 접근 권한과 `Authorization: Bearer <session-token>` 인증 값을 검증합니다.
+
+- `readScheduleJson(request)` / `readJson(request)`
+  - 요청 본문 JSON을 읽고 일정 payload 또는 일반 object로 반환합니다.
+
+- `normalizeIdentifier(value)` / `requiredString(value, message)` / `optionalString(value)`
+  - API 입력 문자열을 정규화하고 필수/선택 값을 검증합니다.
+
+- `toGroupJson(group)` / `toScheduleJson(schedule)`
+  - DB row를 Android client 응답 JSON 형태로 변환합니다.
+
+- `jsonResponse(body, status)` / `errorResponse(status, message)` / `apiError(status, message)` / `toApiError(error)`
+  - 성공/오류 HTTP 응답과 route 처리용 오류 객체를 생성합니다.
+
+---
+
 ## Entity 데이터 구조
 
 ### `data/entity/AppointmentCandidateEntity.kt`
@@ -606,133 +751,3 @@
 - `ScheduleEntity`
   - 최종 저장된 일정입니다.
   - 제목, 시작/종료 시각, 장소, 메모, 상태, 원본 텍스트/출처, 생성/수정 시각을 보관합니다.
-
----
-
-## 2026-05-10 기능 재구성 업데이트
-
-### `ui/MainActivity.kt`
-
-- 기본 시작 route는 `Route.Schedule`입니다.
-- 메인 화면은 `MascotScaffold`가 감싸며 PNG 캐릭터 탭 4개를 제공합니다: 일정(`mascot_note`), 후보(`mascot_basket`), 공유(`mascot_plane`), 설정(`mascot_settings`).
-- `Route.ScheduleEdit(scheduleId)`는 저장된 일정 수정 화면을 엽니다.
-- 후보 알림 deep link는 기존처럼 후보/충돌 route로 이동하되, 뒤로가기는 후보 바구니로 돌아갑니다.
-
-### `ui/WeeklyScheduleScreen.kt`
-
-- `WeeklyScheduleScreen(repository, onOpenSchedule)`
-  - `observeSchedules()`를 구독해 오늘부터 7일간의 저장 일정을 날짜별 카드로 표시합니다.
-  - 각 일정 row는 시간, 제목, 장소/상태를 보여주며 클릭 시 저장 일정 수정 route를 호출합니다.
-
-### `ui/ScheduleEditScreen.kt`
-
-- `ScheduleEditScreen(repository, scheduleId, onBack)`
-  - `observeSchedule(scheduleId)`로 저장 일정 1건을 관찰합니다.
-  - 제목, 시작/종료 시각, 장소, 메모, 상태를 편집합니다.
-  - 제목과 시작 시각이 유효할 때 `PlannerRepository.updateSchedule`로 저장하고 일정 화면으로 돌아갑니다.
-- `scheduleStatusFromDb(value)` / `statusDbLabel(value)`
-  - DB status 문자열과 UI `ScheduleStatus`/라벨을 상호 변환합니다.
-
-### `ui/PlannerScreen.kt`
-
-- `BasketScreen(repository, onOpenCandidate)`
-  - 기존 플래너 화면의 후보 입력/필터/후보 목록 기능만 담당합니다.
-  - 전체 저장 일정 목록과 공유 버튼은 제거되어, 약속 후보 추가 기능이 바구니 친구 탭으로 분리됩니다.
-- `CandidateBasketCard(candidate, onClick)`
-  - 후보 제목, 시간, 장소, 확정 가능/수정 필요 상태를 표시하고 후보 편집 화면을 엽니다.
-
-### `ui/SettingsScreen.kt`
-
-- `SettingsScreen(sharingRepository)`
-  - 세션 존재 여부, 캐시된 공유 ID, 공유 API 설정 상태, 앱 버전을 표시합니다.
-  - 로그아웃은 저장된 세션 토큰과 공유 ID 캐시를 삭제합니다.
-  - 비밀번호 변경은 현재 Android 계정 API가 없어 MVP 안내/준비 액션만 제공합니다.
-
-### `data/dao/ScheduleDao.kt`
-
-- `observe(id)`
-  - 저장 일정 ID로 일정 1건을 `Flow`로 관찰합니다.
-- `get(id)`
-  - 저장 일정 ID로 일정 1건을 suspend 조회합니다.
-- `update(schedule)`
-  - 저장 일정 편집 화면에서 변경된 값을 DB에 반영합니다.
-
-### `data/repository/PlannerRepository.kt`
-
-- `observeSchedule(id)` / `getSchedule(id)`
-  - 저장 일정 편집 화면이 사용할 일정 단건 조회 API입니다.
-- `updateSchedule(scheduleId, title, startAt, endAt, location, memo, status)`
-  - 저장된 최종 일정을 수정합니다.
-  - 제목은 blank일 수 없고, 시작 시각 입력이 null이면 기존 시작 시각을 유지합니다.
-  - 장소/메모 blank는 null로 저장하며 `updatedAt`을 현재 시각으로 갱신합니다.
-
-### `data/supabase/SharingRepository.kt`
-
-- `hasCachedSession()`
-  - 설정 화면에서 기존 앱 세션 토큰 존재 여부를 표시할 때 사용합니다.
-- `clearAccountCache()`
-  - 설정 화면 로그아웃 동작으로 세션 토큰과 공유 ID 캐시를 삭제합니다.
-
-
----
-
-## 2026-05 Login-gated auth and account schedule sync
-
-### `data/auth/AuthRepository.kt`
-
-- `isConfigured()` returns whether `PLANNER_API_BASE_URL` is available for the Supabase Edge Function planner API.
-- `hasSession()` and `sessionToken()` read the current app session from `PLANNER_SESSION_PREFS_NAME` / `PLANNER_SESSION_TOKEN_KEY`.
-- `isGuestMode()` and `hasAppAccess()` expose the local guest-mode fallback used when the user skips authentication.
-- `login(identifier, password)` calls `POST /api/auth/login` on the `planner-api` Edge Function, expects a JSON `sessionToken` / `session_token` / `token`, stores it in SharedPreferences, and returns the optional `userId` / `user_id` / `uid`.
-- `signUp(identifier, password)` calls `POST /api/auth/signup` on the `planner-api` Edge Function with the same response contract and storage behavior.
-- The auth payload now uses an `id` field instead of email, so the Android client no longer performs email-format validation.
-- `enterGuestMode()` persists a local guest session so the app can open without a backend account.
-- `clearAccess()` removes both the cached auth token and the guest-mode flag.
-- Auth validation and fallback API errors are surfaced as readable Korean messages on the auth form.
-- The Android app stores only the app session token; stable account IDs and Supabase writes are resolved by the Supabase Edge Function.
-
-### `ui/LoginScreen.kt`
-
-- Shows a login form when no cached session token or guest-mode flag exists.
-- Uses the Korean product title `?? ???` on the auth card.
-- Includes an in-place `????` mode with password confirmation.
-- Uses an `???` field instead of email and no longer enforces email-format validation.
-- Includes a `???? ??` action that opens the app without creating a backend session.
-- All login/signup labels, action buttons, validation messages, and missing API configuration notices are rendered as readable Korean copy.
-- On successful login/signup, routes into the main schedule UI.
-
-### `data/supabase/SharingRepository.kt`
-
-- `uploadPersonalSchedule(schedule)` posts one local Room schedule to `POST /api/planner/schedules` with `Authorization: Bearer <session-token>`.
-- Personal schedule upload uses the same schedule JSON shape as group sharing: `localScheduleId`, `title`, `startAt`, `endAt`, `location`, `memo`, `status`, `sourceText`, and `sourceApp`.
-- The `planner-api` Edge Function validates the token, resolves the login account `userId`, and upserts Supabase rows with `created_by=userId` so phone-created schedules are tied to the correct account.
-
-### `OnMyPlateApp.syncScheduleAsync(schedule)`
-
-- Fire-and-forget helper used after local schedule creation or edits.
-- If the share/planner API is configured and a session token is cached, uploads the schedule to the account-based personal schedule endpoint.
-- Sync failures are swallowed so local schedule save/edit is not rolled back by network problems.
-
-### `ui/SettingsScreen.kt`
-
-- Shows whether the app is using a real session or the guest-mode fallback.
-- `????` clears both the cached backend session and the local guest-mode flag.
-
-### Android networking
-
-- The Android app no longer ships any PC-local cleartext HTTP override. API endpoints are expected to be HTTPS-hosted.
-
-### `supabase/functions/planner-api/index.ts`
-
-- Implements one Supabase Edge Function for Android login, schedule sync, and sharing without Supabase Auth.
-- `POST /api/auth/signup` creates a `planner_users` row, stores a PBKDF2 password hash, ensures a `planner_profiles` row, creates a `planner_sessions` row, and returns `sessionToken` plus `userId`.
-- `POST /api/auth/login` verifies the app password against `planner_users`, creates a new `planner_sessions` row, and returns the same Android auth response contract.
-- Authenticated planner routes read `Authorization: Bearer <session-token>`, hash it, validate it against non-expired `planner_sessions`, and use the resolved `user_id` for permission checks.
-- Sharing routes enforce `planner_group_members` membership before reading or writing shared schedules.
-- `POST /api/planner/schedules` upserts phone-created schedules into `planner_personal_schedules`.
-
-### Schedule date/time picker UI
-
-- `DateTimePickerField` displays formatted schedule timestamps as read-only fields.
-- Tapping a field opens Android `DatePickerDialog`, then `TimePickerDialog`; optional end times can be cleared.
-- `ScheduleEditScreen` and candidate editing use picker-backed epoch millis values instead of asking users to type `yyyy-MM-dd HH:mm` manually.

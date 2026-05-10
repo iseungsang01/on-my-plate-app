@@ -1,25 +1,15 @@
 create extension if not exists pgcrypto;
 
 -- Supabase Auth is intentionally not used. The Supabase Edge Function
--- `planner-api` owns app login/session verification and uses service_role
--- credentials internally; Android never receives service_role credentials.
+-- `planner-api` owns app login and uses service_role credentials internally;
+-- Android never receives service_role credentials.
 create table if not exists public.planner_users (
   id text primary key,
   password_hash text not null,
-  password_salt text not null,
-  password_iterations integer not null default 210000,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint planner_users_id_format
     check (id ~ '^[A-Za-z0-9._-]{3,40}$')
-);
-
-create table if not exists public.planner_sessions (
-  token_hash text primary key,
-  user_id text not null references public.planner_users(id) on delete cascade,
-  expires_at timestamptz not null,
-  created_at timestamptz not null default now(),
-  last_used_at timestamptz
 );
 
 create table if not exists public.planner_profiles (
@@ -97,15 +87,12 @@ create table if not exists public.planner_dummy_schedules (
 );
 
 create index if not exists planner_profiles_public_id_idx on public.planner_profiles(public_id);
-create index if not exists planner_sessions_user_id_idx on public.planner_sessions(user_id);
-create index if not exists planner_sessions_expires_at_idx on public.planner_sessions(expires_at);
 create index if not exists planner_group_members_user_id_idx on public.planner_group_members(user_id);
 create index if not exists planner_schedules_group_start_idx on public.planner_schedules(group_id, start_at);
 create index if not exists planner_personal_schedules_user_start_idx on public.planner_personal_schedules(created_by, start_at);
 create index if not exists planner_dummy_schedules_group_start_idx on public.planner_dummy_schedules(group_id, start_at);
 
 alter table public.planner_users enable row level security;
-alter table public.planner_sessions enable row level security;
 alter table public.planner_profiles enable row level security;
 alter table public.planner_groups enable row level security;
 alter table public.planner_group_members enable row level security;
@@ -136,7 +123,6 @@ drop policy if exists "creators delete dummy schedules" on public.planner_dummy_
 -- login, membership, and ownership checks before using its server-only
 -- service_role credentials.
 revoke all on public.planner_users from anon, authenticated;
-revoke all on public.planner_sessions from anon, authenticated;
 revoke all on public.planner_profiles from anon, authenticated;
 revoke all on public.planner_groups from anon, authenticated;
 revoke all on public.planner_group_members from anon, authenticated;
@@ -145,7 +131,6 @@ revoke all on public.planner_personal_schedules from anon, authenticated;
 revoke all on public.planner_dummy_schedules from anon, authenticated;
 
 grant all on public.planner_users to service_role;
-grant all on public.planner_sessions to service_role;
 grant all on public.planner_profiles to service_role;
 grant all on public.planner_groups to service_role;
 grant all on public.planner_group_members to service_role;

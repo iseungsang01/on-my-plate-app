@@ -249,7 +249,7 @@
 - Sharing is opt-in from the planner screen. Android calls the Supabase Edge Function `planner-api` configured by `PLANNER_API_BASE_URL`.
 - Android reads the existing app login token from SharedPreferences and sends it as `Authorization: Bearer <token>`. Defaults: `PLANNER_SESSION_PREFS_NAME=planner_auth`, `PLANNER_SESSION_TOKEN_KEY=session_token`.
 - Android does not create anonymous Supabase Auth sessions, store Supabase access/refresh tokens, or write directly to Supabase PostgREST tables.
-- The `planner-api` Edge Function verifies the existing session token against `planner_sessions`, resolves the app user ID, checks group membership/ownership, and performs Supabase DB work with server-only credentials.
+- The `planner-api` Edge Function treats the existing app session token as the user id, checks group membership/ownership with that id, and performs Supabase DB work with server-only credentials.
 - Entering a partner `public_id` asks `planner-api` to create or reuse a group and return accessible groups/schedules.
 - Only selected local schedules are uploaded to `planner-api`; they remain independent copies of Room rows.
 - Shared-screen-only dummy schedules are read through the API but are never inserted into Room, conflict detection, notifications, or widget snapshots.

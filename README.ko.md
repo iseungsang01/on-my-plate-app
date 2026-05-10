@@ -79,6 +79,6 @@ Unix 계열 셸에서는 다음을 사용합니다.
 
 ## Supabase Edge Function planner API
 
-The Android app uses a single Supabase Edge Function, `planner-api`, for app login, schedule sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` or CI as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` verifies the app's own `planner_users` / `planner_sessions` rows and then writes to Supabase with server-only service-role credentials.
+The Android app uses a single Supabase Edge Function, `planner-api`, for app login, schedule sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` or CI as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` uses the app's own `planner_users` rows, returns the user id as the app session token, and then writes to Supabase with server-only service-role credentials.
 
 Android never stores service-role credentials and no longer depends on any PC-local backend. Shared-screen-only dummy schedules are read from `planner_dummy_schedules` through the API and are never stored in Room or the widget. See `supabaseSQL.md` for the server-side schema and RLS posture.

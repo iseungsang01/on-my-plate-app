@@ -77,6 +77,6 @@ The native Android widget is part of this MVP and renders only Room-backed sched
 
 ## Supabase Edge Function planner API
 
-The Android app uses a single Supabase Edge Function, `planner-api`, for app login, schedule sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` (or CI env) as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` verifies the app's own `planner_users` / `planner_sessions` rows and then writes to Supabase with server-only service-role credentials.
+The Android app uses a single Supabase Edge Function, `planner-api`, for app login, schedule sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` (or CI env) as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` uses the app's own `planner_users` rows, returns the user id as the app session token, and then writes to Supabase with server-only service-role credentials.
 
 The Android app never stores service-role credentials and no longer depends on any PC-local backend. Shared-screen-only fake entries live in `planner_dummy_schedules` and are never copied into Room or the home widget. See `supabaseSQL.md` for the server-side schema and RLS posture.

@@ -2,7 +2,8 @@
 
 ## Documentation Maintenance
 
-- When changing app behavior, architecture, public workflows, or any function documented in `spec_func.md`, update `spec_func.md` in the same change so the function-level specification stays current.
+- When changing app behavior, architecture, public workflows, or any function documented in `spec_func.md`, update only the affected function/method descriptions in `spec_func.md` so they describe the current behavior.
+- Do not append changelog-style sections, date-based update notes, or prose that explains what changed in `spec_func.md`; remove obsolete change-description notes and keep the file as a current function-level specification.
 
 ## Android Release Workflow
 
