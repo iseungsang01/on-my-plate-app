@@ -16,6 +16,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -23,9 +27,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.lss.onmyplate.nativeplanner.BuildConfig
 import com.lss.onmyplate.nativeplanner.OnMyPlateApp
@@ -157,10 +163,10 @@ sealed interface Route {
     data class Complete(val candidateId: String) : Route
 }
 
-private enum class MainTab(val label: String, val route: Route, val imageRes: Int) {
+private enum class MainTab(val label: String, val route: Route, val imageRes: Int, val badgeText: String? = null) {
     Schedule("일정", Route.Schedule, R.drawable.mascot_note),
     Basket("후보", Route.Basket, R.drawable.mascot_basket),
-    Sharing("공유", Route.Sharing, R.drawable.mascot_plane),
+    Sharing("공유", Route.Sharing, R.drawable.mascot_plane, badgeText = "준비중"),
     Settings("설정", Route.Settings, R.drawable.mascot_settings),
 }
 
@@ -178,11 +184,16 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit) {
             BasketScreen(repository = app.repository, onOpenCandidate = { onRoute(Route.Candidate(it)) })
         }
         Route.Sharing -> MascotScaffold(selected = MainTab.Sharing, onRoute = onRoute) {
-            SharingScreen(plannerRepository = app.repository, sharingRepository = app.sharingRepository, onBack = { onRoute(Route.Schedule) })
+            ComingSoonScreen(
+                title = "공유",
+                message = "공유 기능은 현재 MVP에서 미실행 예정입니다.\nUI는 업데이트 예정 상태로 보여드리고 있어요.",
+                onBack = { onRoute(Route.Schedule) },
+            )
         }
         Route.Settings -> MascotScaffold(selected = MainTab.Settings, onRoute = onRoute) {
             SettingsScreen(
                 authRepository = app.authRepository,
+                feedbackRepository = app.feedbackRepository,
                 sharingRepository = app.sharingRepository,
                 onLoggedOut = {
                     app.authRepository.clearAccess()
@@ -219,6 +230,54 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit) {
 }
 
 @Composable
+private fun ComingSoonScreen(title: String, message: String, onBack: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        FeedLoopColors.Background,
+                        FeedLoopColors.PrimaryLight.copy(alpha = 0.35f),
+                    ),
+                ),
+            ),
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface),
+                border = BorderStroke(1.dp, FeedLoopColors.Border),
+                elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
+            ) {
+                Column(
+                    Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        message,
+                        color = FeedLoopColors.Secondary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                    Button(onClick = onBack, colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark)) {
+                        Text("일정으로 돌아가기")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MascotScaffold(selected: MainTab, onRoute: (Route) -> Unit, content: @Composable BoxScope.() -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f), content = content)
@@ -226,7 +285,7 @@ private fun MascotScaffold(selected: MainTab, onRoute: (Route) -> Unit, content:
             Modifier
                 .fillMaxWidth()
                 .background(FeedLoopColors.Surface)
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(horizontal = 6.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -235,21 +294,38 @@ private fun MascotScaffold(selected: MainTab, onRoute: (Route) -> Unit, content:
                 Column(
                     Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(18.dp))
                         .clickable { onRoute(tab.route) }
                         .background(if (isSelected) FeedLoopColors.PrimaryLight else Color.Transparent)
-                        .padding(vertical = 6.dp),
+                        .padding(vertical = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Image(
-                        painter = painterResource(tab.imageRes),
-                        contentDescription = tab.label,
-                        modifier = Modifier.size(if (isSelected) 58.dp else 48.dp),
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Image(
+                            painter = painterResource(tab.imageRes),
+                            contentDescription = tab.label,
+                            modifier = Modifier.size(if (isSelected) 48.dp else 40.dp),
+                        )
+                        tab.badgeText?.let { badgeText ->
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                badgeText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = FeedLoopColors.Pending,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .background(FeedLoopColors.PendingBg, RoundedCornerShape(999.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
                     Text(
                         tab.label,
                         color = if (isSelected) FeedLoopColors.PrimaryDark else FeedLoopColors.Secondary,
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                     )
                 }

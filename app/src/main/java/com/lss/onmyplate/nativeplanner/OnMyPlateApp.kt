@@ -6,6 +6,7 @@ import com.lss.onmyplate.nativeplanner.data.auth.AuthRepository
 import com.lss.onmyplate.nativeplanner.data.db.AppDatabase
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
+import com.lss.onmyplate.nativeplanner.data.supabase.FeedbackRepository
 import com.lss.onmyplate.nativeplanner.data.supabase.SharingRepository
 import com.lss.onmyplate.nativeplanner.domain.parser.GeminiAppointmentParser
 import com.lss.onmyplate.nativeplanner.domain.parser.KoreanAppointmentParser
@@ -34,6 +35,7 @@ class OnMyPlateApp : Application() {
     }
     val repository by lazy { PlannerRepository(database, parser) }
     val authRepository by lazy { AuthRepository(this) }
+    val feedbackRepository by lazy { FeedbackRepository(this) }
     val sharingRepository by lazy { SharingRepository(this) }
     val notifications by lazy { AppointmentNotificationManager(this) }
 

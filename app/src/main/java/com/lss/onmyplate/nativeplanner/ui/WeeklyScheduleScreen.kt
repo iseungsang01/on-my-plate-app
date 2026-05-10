@@ -4,9 +4,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,6 +15,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,7 +31,6 @@ import java.time.temporal.TemporalAdjusters
 private val scheduleZone = ZoneId.of("Asia/Seoul")
 private val dayLabelFormatter = DateTimeFormatter.ofPattern("M/d")
 private val weekdayFormatter = DateTimeFormatter.ofPattern("E")
-private const val timetableStartMinute = 8 * 60
 private const val timetableEndMinute = 24 * 60
 private const val defaultScheduleDurationMinutes = 60
 
@@ -55,10 +54,11 @@ fun WeeklyScheduleScreen(repository: PlannerRepository, onOpenSchedule: (String,
             .fillMaxSize()
             .background(Brush.verticalGradient(listOf(FeedLoopColors.Background, FeedLoopColors.PrimaryLight.copy(alpha = 0.45f))))
     ) {
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Column(Modifier.fillMaxSize().padding(12.dp)) {
             WeeklyTimetableWidget(
                 days = days,
                 schedulesByDay = schedulesByDay,
+                onPreviousWeek = { weekOffset -= 1 },
                 onNextWeek = { weekOffset += 1 },
                 onOpenSchedule = onOpenSchedule,
                 modifier = Modifier.fillMaxSize(),
@@ -71,10 +71,23 @@ fun WeeklyScheduleScreen(repository: PlannerRepository, onOpenSchedule: (String,
 private fun WeeklyTimetableWidget(
     days: List<LocalDate>,
     schedulesByDay: Map<LocalDate, List<ScheduleOccurrence>>,
+    onPreviousWeek: () -> Unit,
     onNextWeek: () -> Unit,
     onOpenSchedule: (String, Long?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var visibleStartHour by remember { mutableStateOf(8) }
+    var visibleEndHour by remember { mutableStateOf(24) }
+    var startHourInput by remember { mutableStateOf("8") }
+    var endHourInput by remember { mutableStateOf("24") }
+    val parsedStartHour = startHourInput.toIntOrNull()
+    val parsedEndHour = endHourInput.toIntOrNull()
+    val canApplyTimeRange = parsedStartHour != null &&
+        parsedEndHour != null &&
+        parsedStartHour in 0..23 &&
+        parsedEndHour in 1..24 &&
+        parsedStartHour < parsedEndHour
+
     Card(
         modifier,
         colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface),
@@ -82,22 +95,69 @@ private fun WeeklyTimetableWidget(
         elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
     ) {
         Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                IconButton(onClick = onPreviousWeek, modifier = Modifier.size(32.dp)) {
+                    Text("<", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                }
                 Text(
                     "${dayLabelFormatter.format(days.first())} - ${dayLabelFormatter.format(days.last())}",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = FeedLoopColors.TextPrimary,
+                    modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = onNextWeek) {
-                    Text(">", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = startHourInput,
+                        onValueChange = { if (it.length <= 2 && it.all(Char::isDigit)) startHourInput = it },
+                        placeholder = { Text("시작") },
+                        modifier = Modifier.width(58.dp),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.labelSmall,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    Text("~", color = FeedLoopColors.Secondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                    OutlinedTextField(
+                        value = endHourInput,
+                        onValueChange = { if (it.length <= 2 && it.all(Char::isDigit)) endHourInput = it },
+                        placeholder = { Text("끝") },
+                        modifier = Modifier.width(58.dp),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.labelSmall,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    Button(
+                        onClick = {
+                            val start = parsedStartHour ?: return@Button
+                            val end = parsedEndHour ?: return@Button
+                            if (start in 0..23 && end in 1..24 && start < end) {
+                                visibleStartHour = start
+                                visibleEndHour = end
+                                startHourInput = start.toString()
+                                endHourInput = end.toString()
+                            }
+                        },
+                        enabled = canApplyTimeRange,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.heightIn(min = 32.dp),
+                    ) {
+                        Text("적용", style = MaterialTheme.typography.labelSmall)
+                    }
+                    IconButton(onClick = onNextWeek, modifier = Modifier.size(32.dp)) {
+                        Text(">", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
             TimetableHeader(days = days)
             TimetableBody(
                 days = days,
                 schedulesByDay = schedulesByDay,
+                startHour = visibleStartHour,
+                endHour = visibleEndHour,
                 onOpenSchedule = onOpenSchedule,
                 modifier = Modifier.weight(1f),
             )
@@ -111,7 +171,7 @@ private fun TimetableHeader(days: List<LocalDate>) {
     Row(
         Modifier
             .fillMaxWidth()
-            .height(38.dp)
+            .height(32.dp)
             .clip(MaterialTheme.shapes.medium)
             .background(FeedLoopColors.Tertiary),
         verticalAlignment = Alignment.CenterVertically,
@@ -119,7 +179,7 @@ private fun TimetableHeader(days: List<LocalDate>) {
         Spacer(Modifier.width(railWidth))
         days.forEach { day ->
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(weekdayFormatter.format(day), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = FeedLoopColors.TextPrimary)
+                Text(weekdayFormatter.format(day), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = FeedLoopColors.TextPrimary)
                 Text(dayLabelFormatter.format(day), style = MaterialTheme.typography.labelSmall, color = FeedLoopColors.Secondary)
             }
         }
@@ -130,16 +190,19 @@ private fun TimetableHeader(days: List<LocalDate>) {
 private fun TimetableBody(
     days: List<LocalDate>,
     schedulesByDay: Map<LocalDate, List<ScheduleOccurrence>>,
+    startHour: Int,
+    endHour: Int,
     onOpenSchedule: (String, Long?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val railWidth = 28.dp
-    val hourMarks = remember { (8..24 step 2).toList() }
+    val startMinute = startHour * 60
+    val endMinute = endHour * 60
+    val hourMarks = remember(startHour, endHour) { (startHour..endHour step 2).toList() }
     val eventsByDay = remember(schedulesByDay, days) {
         days.associateWith { day -> buildTimetableEvents(day, schedulesByDay[day].orEmpty()) }
     }
     val hasEvents = eventsByDay.values.any { it.isNotEmpty() }
-    val scrollState = rememberScrollState()
 
     BoxWithConstraints(
         modifier
@@ -149,13 +212,13 @@ private fun TimetableBody(
             .border(1.dp, FeedLoopColors.BorderMuted, MaterialTheme.shapes.medium)
     ) {
         val bodyWidth = maxWidth
-        val bodyHeight = maxHeight.coerceAtLeast(920.dp)
+        val bodyHeight = maxHeight
         val dayWidth = (bodyWidth - railWidth) / 7f
 
-        Box(Modifier.fillMaxSize().verticalScroll(scrollState)) {
+        Box(Modifier.fillMaxSize()) {
             Box(Modifier.width(bodyWidth).height(bodyHeight)) {
                 hourMarks.forEach { hour ->
-                    val y = bodyHeight * ((hour * 60 - timetableStartMinute).toFloat() / (timetableEndMinute - timetableStartMinute).toFloat())
+                    val y = bodyHeight * ((hour * 60 - startMinute).toFloat() / (endMinute - startMinute).toFloat())
                     Box(
                         Modifier
                             .offset(x = railWidth, y = y)
@@ -197,6 +260,8 @@ private fun TimetableBody(
                             dayWidth = dayWidth,
                             railWidth = railWidth,
                             bodyHeight = bodyHeight,
+                            visibleRangeStartMinute = startMinute,
+                            visibleRangeEndMinute = endMinute,
                             onOpenSchedule = onOpenSchedule,
                         )
                     }
@@ -213,16 +278,18 @@ private fun TimetableEventBlock(
     dayWidth: Dp,
     railWidth: Dp,
     bodyHeight: Dp,
+    visibleRangeStartMinute: Int,
+    visibleRangeEndMinute: Int,
     onOpenSchedule: (String, Long?) -> Unit,
 ) {
-    val boundedStart = event.startMinute.coerceAtLeast(timetableStartMinute)
-    val boundedEnd = event.endMinute.coerceAtMost(timetableEndMinute)
-    if (boundedEnd <= timetableStartMinute || boundedStart >= timetableEndMinute) return
+    val visibleStartMinute = event.startMinute
+    val visibleEndMinute = event.endMinute
+    if (visibleEndMinute <= visibleStartMinute) return
 
-    val visibleMinutes = (timetableEndMinute - timetableStartMinute).toFloat()
+    val visibleMinutes = (visibleRangeEndMinute - visibleRangeStartMinute).toFloat().coerceAtLeast(1f)
     val laneWidth = dayWidth / event.laneCount.toFloat()
-    val top = bodyHeight * ((boundedStart - timetableStartMinute).toFloat() / visibleMinutes) + 2.dp
-    val height = (bodyHeight * ((boundedEnd - boundedStart).toFloat() / visibleMinutes) - 4.dp).coerceAtLeast(26.dp)
+    val top = bodyHeight * ((visibleStartMinute - visibleRangeStartMinute).toFloat() / visibleMinutes) + 2.dp
+    val height = (bodyHeight * ((visibleEndMinute - visibleStartMinute).toFloat() / visibleMinutes) - 4.dp).coerceAtLeast(26.dp)
     val left = railWidth + (dayWidth * dayIndex.toFloat()) + (laneWidth * event.lane.toFloat()) + 3.dp
     val width = (laneWidth - 6.dp).coerceAtLeast(12.dp)
 
@@ -285,7 +352,15 @@ private fun buildTimetableEvents(day: LocalDate, schedules: List<ScheduleOccurre
             laneEnds[lane] = endMinute
         }
         laneCount = maxOf(laneCount, lane + 1)
-        events.add(TimetableEvent(occurrence, startMinute, endMinute, lane, laneCount = 1))
+        events.add(
+            TimetableEvent(
+                occurrence = occurrence,
+                startMinute = startMinute,
+                endMinute = endMinute,
+                lane = lane,
+                laneCount = 1,
+            ),
+        )
     }
 
     return events.map { it.copy(laneCount = laneCount.coerceAtLeast(1)) }
@@ -303,7 +378,7 @@ private fun com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity.endMinute
     return endDateTime.toLocalTime().let { it.hour * 60 + it.minute }
 }
 
-private fun formatHourLabel(hour: Int): String = hour.toString()
+private fun formatHourLabel(hour: Int): String = hour.toString().padStart(2, '0')
 
 private fun formatCompactRange(startMinute: Int, endMinute: Int): String =
     "${formatCompactMinute(startMinute)}-${formatCompactMinute(endMinute)}"

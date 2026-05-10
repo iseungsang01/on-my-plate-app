@@ -1,5 +1,10 @@
 package com.lss.onmyplate.nativeplanner.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +35,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.lss.onmyplate.nativeplanner.BuildConfig
 import com.lss.onmyplate.nativeplanner.data.auth.AuthRepository
+import com.lss.onmyplate.nativeplanner.data.supabase.FeedbackRepository
 import com.lss.onmyplate.nativeplanner.data.supabase.SharingRepository
 import kotlinx.coroutines.launch
 
@@ -37,6 +43,7 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     authRepository: AuthRepository,
     sharingRepository: SharingRepository,
+    feedbackRepository: FeedbackRepository,
     onLoggedOut: () -> Unit = {},
 ) {
     var sessionPresent by remember { mutableStateOf(sharingRepository.hasCachedSession()) }
@@ -46,6 +53,11 @@ fun SettingsScreen(
     var newPassword by remember { mutableStateOf("") }
     var newPasswordConfirm by remember { mutableStateOf("") }
     var changingPassword by remember { mutableStateOf(false) }
+    var passwordChangeExpanded by remember { mutableStateOf(false) }
+    var feedbackText by remember { mutableStateOf("") }
+    var sendingFeedback by remember { mutableStateOf(false) }
+    var feedbackMessage by remember { mutableStateOf<String?>(null) }
+    var feedbackMessageColor by remember { mutableStateOf(FeedLoopColors.Secondary) }
     val scope = rememberCoroutineScope()
 
     val loginState = when {
@@ -54,6 +66,7 @@ fun SettingsScreen(
         else -> "로그인 필요"
     }
     val canChangePassword = sessionPresent && !authRepository.isGuestMode() && authRepository.isConfigured() && !changingPassword
+    val canSendFeedback = feedbackRepository.isConfigured() && !sendingFeedback
 
     Column(
         modifier = Modifier
@@ -67,71 +80,88 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("설정과 계정", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("로그인, 게스트 모드, 앱 정보를 관리합니다.", color = FeedLoopColors.Secondary)
+        Text("로그인, 게스트 모드, 피드백, 앱 정보를 관리합니다.", color = FeedLoopColors.Secondary)
 
-        SettingsCard(title = "세션") {
-            SettingLine("로그인 상태", loginState)
+        SettingsCard(title = "계정 관리") {
             SettingLine("내 공유 ID", publicId.ifBlank { "생성 전" })
-            SettingLine("공유 API", if (sharingRepository.isConfigured()) "설정됨" else "미설정")
-            OutlinedTextField(
-                value = currentPassword,
-                onValueChange = { currentPassword = it },
-                label = { Text("현재 비밀번호") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                enabled = canChangePassword,
-            )
-            OutlinedTextField(
-                value = newPassword,
-                onValueChange = { newPassword = it },
-                label = { Text("새 비밀번호") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                enabled = canChangePassword,
-            )
-            OutlinedTextField(
-                value = newPasswordConfirm,
-                onValueChange = { newPasswordConfirm = it },
-                label = { Text("새 비밀번호 확인") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                enabled = canChangePassword,
-            )
+            SettingLine("로그인 상태", loginState)
             Button(
                 onClick = {
-                    when {
-                        currentPassword.isBlank() -> message = "현재 비밀번호를 입력하세요."
-                        newPassword.length < 6 -> message = "새 비밀번호는 6자 이상이어야 합니다."
-                        newPassword != newPasswordConfirm -> message = "새 비밀번호 확인이 일치하지 않습니다."
-                        else -> {
-                            changingPassword = true
-                            message = null
-                            scope.launch {
-                                runCatching {
-                                    authRepository.changePassword(currentPassword, newPassword)
-                                }.onSuccess {
-                                    currentPassword = ""
-                                    newPassword = ""
-                                    newPasswordConfirm = ""
-                                    message = "비밀번호를 변경했습니다."
-                                }.onFailure { error ->
-                                    message = error.message ?: "비밀번호 변경에 실패했습니다."
-                                }
-                                changingPassword = false
-                            }
-                        }
-                    }
+                    passwordChangeExpanded = !passwordChangeExpanded
+                    message = null
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = canChangePassword,
             ) {
-                Text(if (changingPassword) "변경 중..." else "비밀번호 변경")
+                Text(if (passwordChangeExpanded) "비밀번호 변경 접기" else "비밀번호 변경")
+            }
+            AnimatedVisibility(
+                visible = passwordChangeExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = currentPassword,
+                        onValueChange = { currentPassword = it },
+                        label = { Text("현재 비밀번호") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        enabled = canChangePassword,
+                    )
+                    OutlinedTextField(
+                        value = newPassword,
+                        onValueChange = { newPassword = it },
+                        label = { Text("새 비밀번호") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        enabled = canChangePassword,
+                    )
+                    OutlinedTextField(
+                        value = newPasswordConfirm,
+                        onValueChange = { newPasswordConfirm = it },
+                        label = { Text("새 비밀번호 확인") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        enabled = canChangePassword,
+                    )
+                    Button(
+                        onClick = {
+                            when {
+                                currentPassword.isBlank() -> message = "현재 비밀번호를 입력하세요."
+                                newPassword.length < 6 -> message = "새 비밀번호는 6자 이상이어야 합니다."
+                                newPassword != newPasswordConfirm -> message = "새 비밀번호와 확인 값이 일치하지 않습니다."
+                                else -> {
+                                    changingPassword = true
+                                    message = null
+                                    scope.launch {
+                                        runCatching {
+                                            authRepository.changePassword(currentPassword, newPassword)
+                                        }.onSuccess {
+                                            currentPassword = ""
+                                            newPassword = ""
+                                            newPasswordConfirm = ""
+                                            message = "비밀번호를 변경했습니다."
+                                        }.onFailure { error ->
+                                            message = error.message ?: "비밀번호 변경에 실패했습니다."
+                                        }
+                                        changingPassword = false
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = canChangePassword,
+                    ) {
+                        Text(if (changingPassword) "변경 중..." else "변경 확인")
+                    }
+                }
             }
             if (!canChangePassword && !changingPassword) {
-                Text("로그인 세션과 인증 API가 있을 때 비밀번호를 변경할 수 있습니다.", color = FeedLoopColors.Secondary)
+                Text("로그인 세션과 인증 API가 있을 때만 비밀번호를 변경할 수 있습니다.", color = FeedLoopColors.Secondary)
             }
             OutlinedButton(
                 onClick = {
@@ -139,7 +169,7 @@ fun SettingsScreen(
                     sharingRepository.clearAccountCache()
                     sessionPresent = false
                     publicId = ""
-                    message = "저장된 세션과 게스트 상태를 삭제했습니다."
+                    message = "저장된 세션과 게스트 상태를 모두 삭제했습니다."
                     onLoggedOut()
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -147,6 +177,59 @@ fun SettingsScreen(
             ) {
                 Text("로그아웃")
             }
+        }
+
+        SettingsCard(title = "피드백 남기기") {
+            Text(
+                "버그 신고, 개선 제안, 사용 중 불편한 점을 남겨주세요.",
+                color = FeedLoopColors.Secondary,
+            )
+            OutlinedTextField(
+                value = feedbackText,
+                onValueChange = {
+                    feedbackText = it
+                    feedbackMessage = null
+                },
+                label = { Text("피드백 내용") },
+                placeholder = { Text("어떤 점이 불편했는지, 어떻게 바뀌면 좋을지 적어주세요.") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 4,
+                maxLines = 6,
+                enabled = canSendFeedback,
+            )
+            Button(
+                onClick = {
+                    val trimmed = feedbackText.trim()
+                    if (trimmed.isBlank()) {
+                        feedbackMessage = "피드백 내용을 입력하세요."
+                        feedbackMessageColor = FeedLoopColors.Error
+                        return@Button
+                    }
+                    sendingFeedback = true
+                    feedbackMessage = null
+                    scope.launch {
+                        runCatching {
+                            feedbackRepository.submitFeedback(trimmed)
+                        }.onSuccess {
+                            feedbackText = ""
+                            feedbackMessage = "피드백을 전송했습니다."
+                            feedbackMessageColor = FeedLoopColors.PrimaryDark
+                        }.onFailure { error ->
+                            feedbackMessage = error.message ?: "피드백 전송에 실패했습니다."
+                            feedbackMessageColor = FeedLoopColors.Error
+                        }
+                        sendingFeedback = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = canSendFeedback && feedbackText.isNotBlank(),
+            ) {
+                Text(if (sendingFeedback) "전송 중..." else "피드백 보내기")
+            }
+            if (!feedbackRepository.isConfigured()) {
+                Text("피드백 기능을 사용하려면 PLANNER_API_BASE_URL 설정이 필요합니다.", color = FeedLoopColors.Secondary)
+            }
+            feedbackMessage?.let { Text(it, color = feedbackMessageColor) }
         }
 
         SettingsCard(title = "앱 정보") {

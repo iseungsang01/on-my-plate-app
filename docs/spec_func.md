@@ -277,6 +277,11 @@
   - Converts one selected Room schedule plus recurrence rule/exceptions to the API contract's camelCase JSON and uploads it with `POST /api/planner/share/groups/{groupId}/schedules`.
 
 - `uploadPersonalSchedule(schedule, recurrenceRule, recurrenceExceptions)`
+### `data/supabase/FeedbackRepository.kt`
+
+- `FeedbackRepository(context)`
+  - Reads the current app session token from SharedPreferences when available and submits feedback through `POST /api/planner/feedback`.
+  - Sends the current app version name/code and the settings source screen with each feedback submission.
   - 저장 일정 1건과 반복 규칙/예외를 `POST /api/planner/schedules`에 업로드해 로그인 계정의 개인 일정으로 동기화합니다.
 
 - `listSharedSchedules(groupId, includeDummy)`
@@ -479,6 +484,8 @@
   - 충돌 해결 화면으로 이동하는 deep link intent를 생성합니다.
 
 - `AppRoot(route, onRoute)`
+  - 공유 탭 아이콘 옆에 `준비중` 배지를 표시합니다.
+  - 공유 탭 아이콘 옆에 `준비중` 배지를 표시합니다.
   - 현재 route에 따라 로그인, 주간 일정, 후보 바구니, 공유, 설정, 일정 편집, 후보 편집, 충돌 해결, 추가 완료 화면 중 하나를 표시합니다.
   - 메인 탭 route는 `MascotScaffold`로 감싸고, 후보 저장 완료 후에는 `Route.Complete(candidateId)`로 이동합니다.
 
@@ -493,18 +500,26 @@
 ### `ui/WeeklyScheduleScreen.kt`
 
 - `WeeklyScheduleScreen(repository, onOpenSchedule)`
+  - Shows the current Monday-to-Sunday schedule view as a full-screen timetable.
+  - The top controls are compacted so the timetable body gets most of the available height.
+
+- `WeeklyTimetableWidget(days, schedulesByDay, onPreviousWeek, onNextWeek, onOpenSchedule)`
+  - Renders a single-line top bar with previous week, date range, compact start/end inputs, apply, and next week.
+  - Expands the timetable area vertically so the visible schedule grid is taller.
+
+- `WeeklyScheduleScreen(repository, onOpenSchedule)`
   - `observeExpandedSchedules()`를 구독해 현재 주 월요일부터 일요일까지의 단일/반복 occurrence를 전체 화면 시간표로 표시합니다.
-  - 상단 다음 주 버튼으로 표시 주간을 한 주씩 앞으로 이동합니다.
+  - 상단 이전 주/다음 주 버튼으로 표시 주간을 한 주씩 앞뒤로 이동합니다.
   - 시간표 일정 블록은 클릭 시 저장 일정 수정 route를 호출하며, 반복 occurrence는 원본 일정 ID와 occurrence 시작 시각을 함께 넘깁니다.
 
-- `WeeklyTimetableWidget(days, schedulesByDay, onNextWeek, onOpenSchedule)`
-  - 월요일-일요일 7일 범위와 다음 주 이동 버튼을 보여주고, 요일 header와 스크롤 가능한 시간표 body를 화면을 채우는 카드로 렌더링합니다.
+- `WeeklyTimetableWidget(days, schedulesByDay, onPreviousWeek, onNextWeek, onOpenSchedule)`
+  - 월요일-일요일 7일 범위와 이전/다음 주 이동 버튼을 보여주고, 시작/끝 시간 숫자 입력과 적용 버튼으로 시간축 범위를 바꿀 수 있는 카드로 렌더링합니다.
 
 - `TimetableHeader(days)`
   - 시간표 상단의 7일 요일/날짜 header를 렌더링합니다.
 
-- `TimetableBody(days, schedulesByDay, onOpenSchedule, modifier)`
-  - 08-24시 시간 grid, 빈 상태, 날짜별 일정 블록을 세로 스크롤 가능한 시간표 본문으로 렌더링합니다.
+- `TimetableBody(days, schedulesByDay, startHour, endHour, onOpenSchedule, modifier)`
+  - 선택한 시작/끝 시간 범위에 맞춘 시간 grid, 빈 상태, 날짜별 일정 블록을 화면 높이에 맞는 시간표 본문으로 렌더링합니다.
 
 - `TimetableEventBlock(event, dayIndex, dayWidth, railWidth, bodyHeight, onOpenSchedule)`
   - occurrence 1건을 시간 위치와 겹침 lane에 맞춰 클릭 가능한 시간표 블록으로 표시하고, 반복 occurrence에는 반복 라벨을 붙입니다.
@@ -546,6 +561,8 @@
   - DB status 문자열과 UI `ScheduleStatus`/라벨을 상호 변환합니다.
 
 ### `ui/SharingScreen.kt`
+
+- In the current MVP UI, the sharing tab is shown as a coming-soon block screen instead of exposing the full sharing workflow.
 
 - `SharingScreen(plannerRepository, sharingRepository, onBack)`
   - Loads or creates the current user's sharing ID through the external share API, and creates groups with a partner sharing ID.
@@ -592,9 +609,11 @@
 
 ### `ui/SettingsScreen.kt`
 
-- `SettingsScreen(sharingRepository, authRepository, onLoggedOut)`
+- `SettingsScreen(authRepository, sharingRepository, feedbackRepository, onLoggedOut)`
+  - 계정 관리 카드에서 세션/게스트 모드 여부, 캐시된 공유 ID, 로그인 상태, 비밀번호 변경 폼, 로그아웃 동작을 표시합니다.
+  - 피드백 남기기 카드에서 사용자가 남긴 문장을 `POST /api/planner/feedback`로 전송하고, 앱 버전과 설정 화면 출처를 함께 저장합니다.
   - 세션/게스트 모드 여부, 캐시된 공유 ID, 공유 API 설정 상태, 앱 버전을 표시합니다.
-  - 로그인 세션과 인증 API가 있으면 현재 비밀번호 확인, 새 비밀번호, 새 비밀번호 확인 입력으로 비밀번호를 변경합니다.
+  - 계정 관리 섹션에서 로그인 세션과 인증 API가 있으면 비밀번호 변경 폼을 펼쳐 현재 비밀번호 확인, 새 비밀번호, 새 비밀번호 확인 입력으로 비밀번호를 변경하고 성공 메시지를 표시합니다.
   - 로그아웃 시 저장된 세션 토큰, 게스트 모드 flag, 공유 ID 캐시를 삭제하고 로그인 화면으로 이동합니다.
 
 - `SettingsCard(title, content)`
@@ -791,6 +810,9 @@
   - 그룹 멤버 권한을 확인한 뒤 공유 일정과 반복 규칙/예외 업로드 및 조회를 처리합니다.
 
 - `uploadPersonalSchedule(userId, request)`
+- `submitFeedback(request)`
+  - 세션 토큰이 있으면 사용자 ID를 함께 저장하고, 없으면 익명으로 `planner_feedback` row를 추가합니다.
+  - 피드백 문장, 앱 버전, 설정 출처를 검증한 뒤 Supabase DB에 저장하고 `{ ok: true }`를 반환합니다.
   - 로그인 사용자의 개인 일정 row와 반복 규칙/예외를 개인 일정 테이블에 upsert/replace합니다.
 
 - `ensureProfile(userId)` / `findExistingGroup(userId, partnerUserId)` / `groupsForUser(userId)`

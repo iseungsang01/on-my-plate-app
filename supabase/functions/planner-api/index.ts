@@ -7,6 +7,12 @@ type SchedulePayload = {
   recurrence: RecurrenceRuleInput | null;
   recurrenceExceptions: RecurrenceExceptionInput[];
 };
+type FeedbackPayload = {
+  message: string;
+  sourceScreen: string;
+  appVersionName: string;
+  appVersionCode: number;
+};
 type RecurrenceRuleInput = {
   frequency: "weekly";
   intervalWeeks: number;
@@ -78,6 +84,10 @@ Deno.serve(async (request) => {
     if (method === "POST" && path === "/api/planner/schedules") {
       const userId = await requireUserId(request);
       return await uploadPersonalSchedule(userId, request);
+    }
+
+    if (method === "POST" && path === "/api/planner/feedback") {
+      return await submitFeedback(request);
     }
 
     return errorResponse(404, "약속 바구니 API 경로를 찾을 수 없습니다.");
@@ -350,6 +360,19 @@ async function uploadPersonalSchedule(userId: string, request: Request): Promise
   return jsonResponse({ schedule: toScheduleJson(schedule[0]) });
 }
 
+async function submitFeedback(request: Request): Promise<Response> {
+  const payload = readFeedbackPayload(await readJson(request));
+  const { error } = await db.from("planner_feedback").insert({
+    user_id: optionalUserId(request),
+    message: payload.message,
+    source_screen: payload.sourceScreen,
+    app_version_name: payload.appVersionName,
+    app_version_code: payload.appVersionCode,
+  });
+  if (error) throw apiError(500, error.message);
+  return jsonResponse({ ok: true });
+}
+
 async function listSharedSchedules(userId: string, groupId: string, includeDummy: boolean): Promise<Response> {
   await requireGroupMember(userId, groupId);
   const { data: schedules, error } = await db
@@ -464,6 +487,14 @@ async function requireUserId(request: Request): Promise<string> {
   return normalizeIdentifier(match[1].trim());
 }
 
+function optionalUserId(request: Request): string | null {
+  const header = request.headers.get("authorization") ?? "";
+  if (!header.trim()) return null;
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) throw apiError(401, "로그인이 필요합니다.");
+  return normalizeIdentifier(match[1].trim());
+}
+
 async function readSchedulePayload(request: Request): Promise<SchedulePayload> {
   const body = await readJson(request);
   return {
@@ -481,6 +512,20 @@ async function readSchedulePayload(request: Request): Promise<SchedulePayload> {
     },
     recurrence: readRecurrenceRule(body.recurrence),
     recurrenceExceptions: readRecurrenceExceptions(body.recurrenceExceptions),
+  };
+}
+
+function readFeedbackPayload(body: Record<string, unknown>): FeedbackPayload {
+  const message = requiredString(body.message, "피드백 내용을 입력하세요.").trim();
+  if (message.length > 2000) throw apiError(400, "피드백은 2000자 이내로 입력하세요.");
+  const sourceScreen = optionalString(body.sourceScreen) ?? "settings";
+  const appVersionName = requiredString(body.appVersionName, "앱 버전 정보가 없습니다.");
+  const appVersionCode = requiredPositiveInteger(body.appVersionCode, "앱 버전 코드가 없습니다.");
+  return {
+    message,
+    sourceScreen,
+    appVersionName,
+    appVersionCode,
   };
 }
 
@@ -635,6 +680,13 @@ function optionalPositiveInteger(value: unknown, fallback: number): number {
   if (value == null) return fallback;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
     throw apiError(400, "Expected a positive integer.");
+  }
+  return value;
+}
+
+function requiredPositiveInteger(value: unknown, message: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw apiError(400, message);
   }
   return value;
 }
