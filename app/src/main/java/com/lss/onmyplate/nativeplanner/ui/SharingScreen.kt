@@ -164,7 +164,12 @@ fun SharingScreen(
                         loading = true
                         message = null
                         try {
-                            sharingRepository.uploadSchedule(group.id, schedule)
+                            sharingRepository.uploadSchedule(
+                                groupId = group.id,
+                                schedule = schedule,
+                                recurrenceRule = plannerRepository.getRecurrenceRule(schedule.id),
+                                recurrenceExceptions = plannerRepository.getRecurrenceExceptions(schedule.id),
+                            )
                             sharedSchedules = sharingRepository.listSharedSchedules(group.id, includeDummy)
                             message = "'${schedule.title}' 일정을 공유했습니다."
                         } catch (t: Throwable) {
@@ -202,6 +207,7 @@ private fun SharedScheduleRow(schedule: SharedSchedule) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(schedule.title, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 if (schedule.isDummy) AssistChip(onClick = {}, label = { Text("공유 전용") })
+                if (schedule.recurrence != null) AssistChip(onClick = {}, label = { Text("반복") })
             }
             Text("${formatDateTime(schedule.startAt)} · ${schedule.status}", color = FeedLoopColors.Secondary, style = MaterialTheme.typography.bodySmall)
             schedule.location?.let { Text(it, color = FeedLoopColors.Secondary, style = MaterialTheme.typography.bodySmall) }

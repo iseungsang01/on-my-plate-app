@@ -7,8 +7,8 @@
 1. `ShareReceiverActivity.onCreate` 또는 `PlannerScreen`의 직접 입력에서 공유/입력 텍스트를 받습니다.
 2. `PlannerRepository.createCandidate`가 `KoreanAppointmentParser.parse`로 일정 후보를 파싱하고 Room에 저장합니다.
 3. `AppointmentNotificationManager.showCandidate` 또는 `CandidateEditScreen`이 사용자에게 제목 입력을 요구합니다.
-4. `PlannerRepository.saveFromCandidate`가 제목 필수 조건, 미정 저장, 충돌 확인, 강제 저장을 처리합니다.
-5. 저장된 `ScheduleEntity`는 `OnMyPlateApp.onCreate`의 observe 루프를 통해 `PlannerWidgetSync.saveSnapshot`으로 위젯 snapshot에 반영됩니다.
+4. `PlannerRepository.saveFromCandidate`가 제목 필수 조건, 미정 저장, 충돌 확인, 강제 저장, 반복 규칙 저장을 처리합니다.
+5. 저장된 `ScheduleEntity`와 반복 규칙/예외는 `observeExpandedSchedules`로 주간 occurrence가 된 뒤 `PlannerWidgetSync.saveSnapshot`으로 위젯 snapshot에 반영됩니다.
 
 ---
 
@@ -19,10 +19,10 @@
 - `onCreate()`
   - 애플리케이션 시작 시 전역 인스턴스를 설정합니다.
   - 알림 채널을 생성합니다.
-  - 저장된 일정 목록을 관찰하다가 변경될 때마다 `PlannerWidgetSync.saveSnapshot`을 호출해 홈 위젯 데이터를 갱신합니다.
+  - 현재 주 범위의 단일/반복 occurrence 목록을 관찰하다가 변경될 때마다 `PlannerWidgetSync.saveSnapshot`을 호출해 홈 위젯 데이터를 갱신합니다.
 
 - `syncScheduleAsync(schedule)`
-  - 공유/planner API가 설정되어 있고 앱 세션 토큰이 있으면 저장 일정을 개인 일정 API로 비동기 업로드합니다.
+  - 공유/planner API가 설정되어 있고 앱 세션 토큰이 있으면 저장 일정과 반복 규칙/예외를 개인 일정 API로 비동기 업로드합니다.
   - 네트워크 동기화 실패가 로컬 저장/수정 동작을 되돌리지 않도록 실패를 내부에서 처리합니다.
 
 ---
@@ -151,8 +151,14 @@
 - `appointmentCandidateDao()`
   - `AppointmentCandidateDao` 인스턴스를 제공합니다.
 
+- `scheduleRecurrenceDao()`
+  - 반복 규칙과 반복 예외를 다루는 `ScheduleRecurrenceDao` 인스턴스를 제공합니다.
+
 - `MIGRATION_1_2.migrate(db)`
   - `appointment_candidates` 테이블에 `sourceApp` 컬럼이 없으면 추가합니다.
+
+- `MIGRATION_2_3.migrate(db)`
+  - `schedule_recurrence_rules`와 `schedule_recurrence_exceptions` 테이블 및 `scheduleId` index를 생성합니다.
 
 - `create(context)`
   - `on_my_plate_native.db` Room database를 생성하고 migration을 연결합니다.
@@ -200,6 +206,20 @@
 
 - `update(schedule)`
   - 저장된 일정 정보를 갱신합니다.
+
+### `data/dao/ScheduleRecurrenceDao.kt`
+
+- `observeRules()` / `observeExceptions()`
+  - 반복 규칙과 반복 예외 목록을 `Flow`로 관찰합니다.
+
+- `getRule(scheduleId)` / `getRules()` / `getExceptions()`
+  - 저장 일정의 반복 규칙 1건, 전체 반복 규칙, 전체 반복 예외를 suspend 조회합니다.
+
+- `upsertRule(rule)` / `deleteRule(scheduleId)`
+  - 저장 일정의 반복 규칙을 저장하거나 삭제합니다.
+
+- `upsertException(exception)`
+  - 특정 반복 occurrence의 예외를 저장합니다.
 
 ---
 
@@ -253,14 +273,20 @@
 - `listGroups()`
   - Calls `GET /api/planner/share/groups` and returns groups accessible to the current logged-in user.
 
-- `uploadSchedule(groupId, schedule)`
-  - Converts one selected Room schedule to the API contract's camelCase JSON and uploads it with `POST /api/planner/share/groups/{groupId}/schedules`.
+- `uploadSchedule(groupId, schedule, recurrenceRule, recurrenceExceptions)`
+  - Converts one selected Room schedule plus recurrence rule/exceptions to the API contract's camelCase JSON and uploads it with `POST /api/planner/share/groups/{groupId}/schedules`.
 
-- `uploadPersonalSchedule(schedule)`
-  - 저장 일정 1건을 `POST /api/planner/schedules`에 업로드해 로그인 계정의 개인 일정으로 동기화합니다.
+- `uploadPersonalSchedule(schedule, recurrenceRule, recurrenceExceptions)`
+  - 저장 일정 1건과 반복 규칙/예외를 `POST /api/planner/schedules`에 업로드해 로그인 계정의 개인 일정으로 동기화합니다.
 
 - `listSharedSchedules(groupId, includeDummy)`
-  - Calls `GET /api/planner/share/groups/{groupId}/schedules?includeDummy=...` and returns schedules sorted by start time.
+  - Calls `GET /api/planner/share/groups/{groupId}/schedules?includeDummy=...` and returns schedules with recurrence metadata sorted by start time.
+
+- `ScheduleEntity.toApiJson(recurrenceRule, recurrenceExceptions)`
+  - 저장 일정과 주간 반복 규칙/skip 예외를 planner API 요청 JSON으로 변환합니다.
+
+- `JSONObject.toSharedSchedule()` / `JSONObject.toSharedScheduleRecurrence()` / `JSONArray?.toRecurrenceExceptions()`
+  - 공유 API 응답의 일정, 반복 규칙, 반복 예외를 Android 모델로 파싱합니다.
 
 - `PlannerShareApiClient.request(...)`
   - Adds `Authorization: Bearer <existing-app-session-token>` to every share API request.
@@ -269,10 +295,19 @@
 ### `data/repository/PlannerRepository.kt`
 
 - `observeSchedules()`
-  - UI와 위젯 동기화가 사용할 저장 일정 목록 `Flow`를 반환합니다.
+  - 원본 저장 일정 목록 `Flow`를 반환합니다.
+
+- `observeExpandedSchedules(rangeStart, rangeEnd)`
+  - 원본 저장 일정, 반복 규칙, 반복 예외를 함께 관찰하고 지정 범위 안의 `ScheduleOccurrence` 목록으로 펼쳐 반환합니다.
 
 - `observeSchedule(id)` / `getSchedule(id)`
   - 저장 일정 편집 화면에서 사용할 일정 1건을 관찰하거나 조회합니다.
+
+- `getRecurrenceRule(scheduleId)`
+  - 저장 일정에 연결된 반복 규칙 1건을 조회합니다.
+
+- `getExpandedSchedules(rangeStart, rangeEnd)`
+  - suspend 문맥에서 지정 범위 안의 단일/반복 occurrence 목록을 조회합니다.
 
 - `observePendingCandidates()`
   - 플래너 화면에 표시할 미처리 후보 목록 `Flow`를 반환합니다.
@@ -294,23 +329,27 @@
   - 시작 시각이 없으면 `NeedsUncertain`을 반환합니다.
   - 시작/종료 구간으로 충돌 일정을 조회하고, 없으면 `Ready`, 있으면 `Conflict`를 반환합니다.
 
-- `saveFromCandidate(candidateId, selectedStatus, titleOverride, force)`
+- `saveFromCandidate(candidateId, selectedStatus, titleOverride, force, recurrenceInput)`
   - transaction 안에서 후보 저장을 처리합니다.
   - 후보가 없으면 `MissingCandidate`, 이미 pending이 아니면 `AlreadyHandled`를 반환합니다.
   - `titleOverride` 또는 후보의 `extractedTitle`이 비어 있으면 `TitleRequired`를 반환합니다.
   - 제목 override가 있으면 후보의 `extractedTitle`을 먼저 갱신합니다.
   - 상태가 `Uncertain`이거나 시작 시간이 없으면 생성 시각을 fallback 시작 시각으로 사용해 저장하고 `SavedAsUncertain`을 반환합니다.
   - 충돌이 있고 `force=false`이면 `Conflict`를 반환합니다.
-  - 충돌이 없거나 강제 저장이면 `insertSchedule` 후 후보를 `confirmed`로 바꾸고 `Saved`를 반환합니다.
+  - 충돌이 없거나 강제 저장이면 `insertSchedule` 후 반복 입력이 있으면 반복 규칙을 저장하고, 후보를 `confirmed`로 바꾸고 `Saved`를 반환합니다.
 
 - `updateCandidate(candidateId, title, startAt, endAt, location)`
   - 사용자가 편집 화면에서 입력한 제목/시작/종료/장소 값을 후보에 반영합니다.
   - 제목은 trim하고, 장소 blank는 null로 저장합니다.
 
-- `updateSchedule(scheduleId, title, startAt, endAt, location, memo, status)`
+- `updateSchedule(scheduleId, title, startAt, endAt, location, memo, status, recurrenceInput)`
   - 저장된 최종 일정을 수정합니다.
   - 제목은 blank일 수 없고, 시작 시각 입력이 null이면 기존 시작 시각을 유지합니다.
   - 장소/메모 blank는 null로 저장하며 `updatedAt`을 현재 시각으로 갱신합니다.
+  - 반복 입력이 전달되면 주간 반복 규칙을 저장하거나 반복 없음으로 삭제합니다.
+
+- `skipRecurringOccurrence(scheduleId, occurrenceStartAt)`
+  - 특정 반복 occurrence를 건너뛰는 예외를 저장합니다.
 
 - `discardCandidate(candidateId)`
   - 후보가 존재하고 아직 `pending`이면 `discarded`로 표시합니다.
@@ -319,6 +358,15 @@
   - 최종 `ScheduleEntity`를 생성해 `schedules` 테이블에 삽입하는 private helper입니다.
   - 시작 시각은 `forceStartAt`, 후보의 시작 시각, 현재 시각 순으로 선택합니다.
   - 후보 시작 시각이 없거나 선택 상태가 `Uncertain`이면 일정 상태를 `uncertain`으로 강제합니다.
+
+- `saveRecurrence(schedule, recurrenceInput)`
+  - 반복 없음이면 해당 일정의 반복 규칙을 삭제하고, 주간 반복이면 일정 시작 요일과 반복 종료/횟수 조건을 저장합니다.
+
+- `expandScheduleOccurrences(savedSchedules, rules, exceptions, rangeStart, rangeEnd)`
+  - 단일 일정은 범위 안에 있을 때 occurrence로 포함하고, 반복 일정은 `expandWeeklySchedule` 결과로 대체합니다.
+
+- `expandWeeklySchedule(schedule, rule, skipped, rangeStart, rangeEnd)`
+  - 주간 반복 규칙을 기준으로 범위 안의 occurrence를 생성하고, skip 예외에 해당하는 occurrence는 제외합니다.
 
 - `SaveAttempt`
   - 저장 전 상태 확인 결과입니다: `MissingCandidate`, `NeedsUncertain`, `Ready`, `Conflict`.
@@ -445,35 +493,30 @@
 ### `ui/WeeklyScheduleScreen.kt`
 
 - `WeeklyScheduleScreen(repository, onOpenSchedule)`
-  - `observeSchedules()`를 구독해 오늘부터 7일간의 저장 일정을 첫 화면의 시간표형 위젯과 하단 날짜별 카드로 표시합니다.
-  - 시간표 일정 블록과 각 일정 row는 클릭 시 저장 일정 수정 route를 호출합니다.
+  - `observeExpandedSchedules()`를 구독해 현재 주 월요일부터 일요일까지의 단일/반복 occurrence를 전체 화면 시간표로 표시합니다.
+  - 상단 다음 주 버튼으로 표시 주간을 한 주씩 앞으로 이동합니다.
+  - 시간표 일정 블록은 클릭 시 저장 일정 수정 route를 호출하며, 반복 occurrence는 원본 일정 ID와 occurrence 시작 시각을 함께 넘깁니다.
 
-- `WeeklyTimetableWidget(days, schedulesByDay, onOpenSchedule)`
-  - 7일 범위와 일정 개수를 보여주고, 요일 header와 시간표 body를 위젯형 카드로 렌더링합니다.
+- `WeeklyTimetableWidget(days, schedulesByDay, onNextWeek, onOpenSchedule)`
+  - 월요일-일요일 7일 범위와 다음 주 이동 버튼을 보여주고, 요일 header와 스크롤 가능한 시간표 body를 화면을 채우는 카드로 렌더링합니다.
 
 - `TimetableHeader(days)`
   - 시간표 상단의 7일 요일/날짜 header를 렌더링합니다.
 
-- `TimetableBody(days, schedulesByDay, onOpenSchedule)`
-  - 08:00-24:00 시간 grid, 빈 상태, 날짜별 일정 블록을 렌더링합니다.
+- `TimetableBody(days, schedulesByDay, onOpenSchedule, modifier)`
+  - 08-24시 시간 grid, 빈 상태, 날짜별 일정 블록을 세로 스크롤 가능한 시간표 본문으로 렌더링합니다.
 
 - `TimetableEventBlock(event, dayIndex, dayWidth, railWidth, bodyHeight, onOpenSchedule)`
-  - 저장 일정 1건을 시간 위치와 겹침 lane에 맞춰 클릭 가능한 시간표 블록으로 표시합니다.
-
-- `DayScheduleCard(day, schedules, onOpenSchedule)`
-  - 하루 단위 일정 목록과 빈 상태 문구를 렌더링합니다.
-
-- `ScheduleSummaryRow(schedule, onClick)`
-  - 저장 일정 1건의 시간, 제목, 장소/상태 요약을 표시합니다.
+  - occurrence 1건을 시간 위치와 겹침 lane에 맞춰 클릭 가능한 시간표 블록으로 표시하고, 반복 occurrence에는 반복 라벨을 붙입니다.
 
 - `buildTimetableEvents(day, schedules)`
   - 하루 일정들을 시작 시간순으로 정렬하고 겹치는 일정이 나란히 보이도록 lane 정보를 계산합니다.
 
-- `ScheduleEntity.minuteOfDay()` / `ScheduleEntity.endMinuteOfDay(day)`
+- `ScheduleOccurrence.localDate()` / `ScheduleEntity.minuteOfDay()` / `ScheduleEntity.endMinuteOfDay(day)`
   - 일정 시작/종료 시각을 시간표 배치용 분 단위 값으로 변환합니다.
 
-- `formatHourLabel(hour)` / `formatMinute(minute)` / `formatCompactRange(startMinute, endMinute)` / `formatCompactMinute(minute)` / `labelOffset(y, bodyHeight)`
-  - 시간표 축과 일정 블록에 표시할 시간 문자열 및 축 라벨 위치를 계산합니다.
+- `formatHourLabel(hour)` / `formatCompactRange(startMinute, endMinute)` / `formatCompactMinute(minute)` / `labelOffset(y, bodyHeight)`
+  - 시간표 축의 정각 숫자, 일정 블록에 표시할 compact 시간 문자열, 축 라벨 위치를 계산합니다.
 
 ### `ui/PlannerScreen.kt`
 
@@ -490,9 +533,10 @@
 
 ### `ui/ScheduleEditScreen.kt`
 
-- `ScheduleEditScreen(repository, scheduleId, onBack)`
+- `ScheduleEditScreen(repository, scheduleId, occurrenceStartAt, onBack)`
   - `observeSchedule(scheduleId)`로 저장 일정 1건을 관찰합니다.
-  - 제목, 시작/종료 시각, 장소, 메모, 상태를 편집합니다.
+  - 제목, 시작/종료 시각, 장소, 메모, 상태, 매주 반복 여부, 반복 종료 시각을 편집합니다.
+  - 반복 occurrence에서 열린 경우 `skipRecurringOccurrence`로 해당 occurrence만 건너뛸 수 있습니다.
   - 제목과 시작 시각이 유효할 때 `PlannerRepository.updateSchedule`로 저장하고 일정 화면으로 돌아갑니다.
 
 - `PlannerTextField(value, onValueChange, label, required)`
@@ -505,7 +549,7 @@
 
 - `SharingScreen(plannerRepository, sharingRepository, onBack)`
   - Loads or creates the current user's sharing ID through the external share API, and creates groups with a partner sharing ID.
-  - Displays local Room schedules and uploads only the schedule selected by the user.
+  - Displays local Room schedules and uploads only the schedule selected by the user with its recurrence rule/exceptions.
   - Displays real shared schedules for the selected group, optionally including dummy schedules returned by the API.
   - Shows a setup/login error when the share API base URL or existing app session token is missing.
   - Provides a checkbox for including dummy schedules.
@@ -514,16 +558,16 @@
   - Renders one local Room schedule with a share button.
 
 - `SharedScheduleRow(schedule)`
-  - Renders one schedule returned by the share API. If `isDummy=true`, it also shows the shared-only chip.
+  - Renders one schedule returned by the share API. If `isDummy=true`, it shows the shared-only chip; if recurrence exists, it shows the recurring chip.
 
 ### `ui/CandidateEditScreen.kt`
 
 - `CandidateEditScreen(repository, candidateId, onDone, onConflict, onBack)`
   - 후보 ID로 약속 후보를 관찰합니다.
-  - 후보의 제목, 시작/종료 날짜와 시간, 장소를 편집할 수 있습니다.
+  - 후보의 제목, 시작/종료 날짜와 시간, 장소, 매주 반복 여부, 반복 종료 시각을 편집할 수 있습니다.
   - 원문 메시지, 신뢰도 progress, 상태 선택 chip을 표시합니다.
   - 후보가 없으면 후보를 찾을 수 없다는 안내를 표시합니다.
-  - 저장 시 먼저 `updateCandidate`로 편집 값을 반영한 뒤 `saveFromCandidate`를 호출합니다.
+  - 저장 시 먼저 `updateCandidate`로 편집 값을 반영한 뒤 반복 입력과 함께 `saveFromCandidate`를 호출합니다.
   - 충돌이 있으면 충돌 화면으로 이동하고, 저장 성공 시 개인 일정 동기화를 요청한 뒤 완료 화면으로 이동합니다.
 
 - `StatusSelector(status, onStatus)`
@@ -593,14 +637,15 @@
 ### `widget/PlannerWidgetSync.kt`
 
 - `syncFromPlannerDatabase(context)`
-  - 앱 context가 `OnMyPlateApp`이면 기존 database를 사용하고, 아니면 새 `AppDatabase`를 열어 모든 일정을 조회합니다.
+  - 앱 context가 `OnMyPlateApp`이면 기존 database를 사용하고, 아니면 새 `AppDatabase`를 엽니다.
+  - 현재 주 범위의 단일/반복 occurrence를 조회합니다.
   - 조회 결과로 `saveSnapshot`을 호출합니다.
   - 임시로 연 DB는 작업 후 닫습니다.
 
 - `saveSnapshot(context, schedules)`
-  - 저장 일정을 시작 시각 기준으로 정렬합니다.
+  - occurrence를 시작 시각 기준으로 정렬합니다.
   - `Asia/Seoul` 날짜별로 `manualEventsByDate` JSON을 구성합니다.
-  - 각 일정은 title, startMinute, endMinute, source=`manual`, isRecurring=false로 저장합니다.
+  - 각 occurrence는 title, startMinute, endMinute, source=`manual`, isRecurring 값을 저장합니다.
   - 현재 주 월요일, viewport 기본값, schema, generatedAt을 포함한 snapshot JSON을 SharedPreferences에 저장합니다.
 
 ### `widget/PlannerWidgetStore.java`
@@ -743,10 +788,10 @@
   - 공유 ID로 상대 사용자를 찾아 그룹을 만들거나 현재 사용자가 속한 공유 그룹 목록을 반환합니다.
 
 - `uploadSharedSchedule(userId, groupId, request)` / `listSharedSchedules(userId, groupId, includeDummy)`
-  - 그룹 멤버 권한을 확인한 뒤 공유 일정 업로드와 조회를 처리합니다.
+  - 그룹 멤버 권한을 확인한 뒤 공유 일정과 반복 규칙/예외 업로드 및 조회를 처리합니다.
 
 - `uploadPersonalSchedule(userId, request)`
-  - 로그인 사용자의 개인 일정 row를 `planner_personal_schedules`에 upsert합니다.
+  - 로그인 사용자의 개인 일정 row와 반복 규칙/예외를 개인 일정 테이블에 upsert/replace합니다.
 
 - `ensureProfile(userId)` / `findExistingGroup(userId, partnerUserId)` / `groupsForUser(userId)`
   - 프로필, 기존 그룹, 사용자별 그룹 목록을 조회하는 database helper입니다.
@@ -754,7 +799,16 @@
 - `requireGroupMember(userId, groupId)` / `requireUserId(request)`
   - 공유 그룹 접근 권한과 `Authorization: Bearer <session-token>` 인증 값을 검증합니다.
 
-- `readScheduleJson(request)` / `readJson(request)`
+- `readSchedulePayload(request)` / `readRecurrenceRule(value)` / `readRecurrenceExceptions(value)`
+  - 요청 JSON에서 일정 본문, 주간 반복 규칙, skip 예외 목록을 읽고 유효성을 검사합니다.
+
+- `saveScheduleRecurrence(scheduleId, recurrence, exceptions, ruleTable, exceptionTable)`
+  - 반복 규칙이 없으면 규칙/예외를 삭제하고, 있으면 규칙을 upsert한 뒤 예외 목록을 replace합니다.
+
+- `attachRecurrenceToSchedules(schedules, ruleTable, exceptionTable)`
+  - 일정 목록에 반복 규칙과 예외 목록을 붙여 API 응답 JSON 변환에 사용할 수 있게 합니다.
+
+- `readJson(request)`
   - 요청 본문 JSON을 읽고 일정 payload 또는 일반 object로 반환합니다.
 
 - `normalizeIdentifier(value)` / `requiredString(value, message)` / `optionalString(value)`
@@ -781,3 +835,25 @@
 - `ScheduleEntity`
   - 최종 저장된 일정입니다.
   - 제목, 시작/종료 시각, 장소, 메모, 상태, 원본 텍스트/출처, 생성/수정 시각을 보관합니다.
+
+### `data/entity/ScheduleRecurrenceRuleEntity.kt`
+
+- `ScheduleRecurrenceRuleEntity`
+  - 저장 일정에 연결된 반복 규칙입니다.
+  - 주간 반복 frequency, 반복 간격, 요일, 종료 시각/횟수, 생성/수정 시각을 보관합니다.
+
+### `data/entity/ScheduleRecurrenceExceptionEntity.kt`
+
+- `ScheduleRecurrenceExceptionEntity`
+  - 반복 일정의 특정 occurrence에 적용되는 예외입니다.
+  - 현재는 occurrence 시작 시각 기준 skip 예외를 보관합니다.
+
+### `data/repository/ScheduleOccurrence.kt`
+
+- `ScheduleOccurrence`
+  - 시간표와 위젯에 표시할 단일 occurrence입니다.
+  - 원본 일정, 원본 schedule ID, occurrence 시작 시각, 반복 여부를 보관합니다.
+
+- `RecurrenceInput`
+  - 저장/수정 화면에서 repository로 전달하는 반복 입력입니다.
+  - 반복 없음 또는 주간 반복과 종료 조건을 표현합니다.

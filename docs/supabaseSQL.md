@@ -70,6 +70,44 @@ create table if not exists public.planner_personal_schedules (
   unique (created_by, local_schedule_id)
 );
 
+create table if not exists public.planner_schedule_recurrence_rules (
+  schedule_id uuid primary key references public.planner_schedules(id) on delete cascade,
+  frequency text not null check (frequency in ('weekly')),
+  interval_weeks integer not null default 1 check (interval_weeks >= 1),
+  day_of_week integer not null check (day_of_week between 1 and 7),
+  until_at timestamptz,
+  count integer check (count is null or count > 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.planner_schedule_recurrence_exceptions (
+  schedule_id uuid not null references public.planner_schedules(id) on delete cascade,
+  occurrence_start_at timestamptz not null,
+  action text not null check (action in ('skip')),
+  created_at timestamptz not null default now(),
+  primary key (schedule_id, occurrence_start_at)
+);
+
+create table if not exists public.planner_personal_schedule_recurrence_rules (
+  schedule_id uuid primary key references public.planner_personal_schedules(id) on delete cascade,
+  frequency text not null check (frequency in ('weekly')),
+  interval_weeks integer not null default 1 check (interval_weeks >= 1),
+  day_of_week integer not null check (day_of_week between 1 and 7),
+  until_at timestamptz,
+  count integer check (count is null or count > 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.planner_personal_schedule_recurrence_exceptions (
+  schedule_id uuid not null references public.planner_personal_schedules(id) on delete cascade,
+  occurrence_start_at timestamptz not null,
+  action text not null check (action in ('skip')),
+  created_at timestamptz not null default now(),
+  primary key (schedule_id, occurrence_start_at)
+);
+
 create table if not exists public.planner_dummy_schedules (
   id uuid primary key default gen_random_uuid(),
   group_id uuid not null references public.planner_groups(id) on delete cascade,
@@ -88,6 +126,8 @@ create index if not exists planner_profiles_public_id_idx on public.planner_prof
 create index if not exists planner_group_members_user_id_idx on public.planner_group_members(user_id);
 create index if not exists planner_schedules_group_start_idx on public.planner_schedules(group_id, start_at);
 create index if not exists planner_personal_schedules_user_start_idx on public.planner_personal_schedules(created_by, start_at);
+create index if not exists planner_schedule_recurrence_exceptions_schedule_idx on public.planner_schedule_recurrence_exceptions(schedule_id);
+create index if not exists planner_personal_schedule_recurrence_exceptions_schedule_idx on public.planner_personal_schedule_recurrence_exceptions(schedule_id);
 create index if not exists planner_dummy_schedules_group_start_idx on public.planner_dummy_schedules(group_id, start_at);
 
 alter table public.planner_users enable row level security;
@@ -96,6 +136,10 @@ alter table public.planner_groups enable row level security;
 alter table public.planner_group_members enable row level security;
 alter table public.planner_schedules enable row level security;
 alter table public.planner_personal_schedules enable row level security;
+alter table public.planner_schedule_recurrence_rules enable row level security;
+alter table public.planner_schedule_recurrence_exceptions enable row level security;
+alter table public.planner_personal_schedule_recurrence_rules enable row level security;
+alter table public.planner_personal_schedule_recurrence_exceptions enable row level security;
 alter table public.planner_dummy_schedules enable row level security;
 
 -- Remove policies from the previous anonymous Supabase Auth draft, if present.
@@ -126,6 +170,10 @@ revoke all on public.planner_groups from anon, authenticated;
 revoke all on public.planner_group_members from anon, authenticated;
 revoke all on public.planner_schedules from anon, authenticated;
 revoke all on public.planner_personal_schedules from anon, authenticated;
+revoke all on public.planner_schedule_recurrence_rules from anon, authenticated;
+revoke all on public.planner_schedule_recurrence_exceptions from anon, authenticated;
+revoke all on public.planner_personal_schedule_recurrence_rules from anon, authenticated;
+revoke all on public.planner_personal_schedule_recurrence_exceptions from anon, authenticated;
 revoke all on public.planner_dummy_schedules from anon, authenticated;
 
 grant all on public.planner_users to service_role;
@@ -134,6 +182,10 @@ grant all on public.planner_groups to service_role;
 grant all on public.planner_group_members to service_role;
 grant all on public.planner_schedules to service_role;
 grant all on public.planner_personal_schedules to service_role;
+grant all on public.planner_schedule_recurrence_rules to service_role;
+grant all on public.planner_schedule_recurrence_exceptions to service_role;
+grant all on public.planner_personal_schedule_recurrence_rules to service_role;
+grant all on public.planner_personal_schedule_recurrence_exceptions to service_role;
 grant all on public.planner_dummy_schedules to service_role;
 
 -- Optional seed data for backend/API smoke tests.

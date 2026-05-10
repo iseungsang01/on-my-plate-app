@@ -4,11 +4,18 @@ import androidx.room.withTransaction
 import com.lss.onmyplate.nativeplanner.data.db.AppDatabase
 import com.lss.onmyplate.nativeplanner.data.entity.AppointmentCandidateEntity
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
+import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceExceptionEntity
+import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceRuleEntity
 import com.lss.onmyplate.nativeplanner.domain.conflict.ConflictDetector
 import com.lss.onmyplate.nativeplanner.domain.model.CandidateStatus
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
 import com.lss.onmyplate.nativeplanner.domain.parser.KoreanAppointmentParser
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 class PlannerRepository(
@@ -17,14 +24,26 @@ class PlannerRepository(
 ) {
     private val schedules = db.scheduleDao()
     private val candidates = db.appointmentCandidateDao()
+    private val recurrence = db.scheduleRecurrenceDao()
 
     fun observeSchedules(): Flow<List<ScheduleEntity>> = schedules.observeAll()
+    fun observeExpandedSchedules(rangeStart: Long, rangeEnd: Long): Flow<List<ScheduleOccurrence>> =
+        combine(schedules.observeAll(), recurrence.observeRules(), recurrence.observeExceptions()) { saved, rules, exceptions ->
+            expandScheduleOccurrences(saved, rules, exceptions, rangeStart, rangeEnd)
+        }
+
     fun observeSchedule(id: String): Flow<ScheduleEntity?> = schedules.observe(id)
     fun observePendingCandidates(): Flow<List<AppointmentCandidateEntity>> = candidates.observePending()
     fun observeCandidate(id: String): Flow<AppointmentCandidateEntity?> = candidates.observe(id)
     suspend fun getCandidate(id: String): AppointmentCandidateEntity? = candidates.get(id)
     suspend fun getSchedules(): List<ScheduleEntity> = schedules.getAll()
     suspend fun getSchedule(id: String): ScheduleEntity? = schedules.get(id)
+    suspend fun getRecurrenceRule(scheduleId: String): ScheduleRecurrenceRuleEntity? = recurrence.getRule(scheduleId)
+    suspend fun getRecurrenceExceptions(scheduleId: String): List<ScheduleRecurrenceExceptionEntity> =
+        recurrence.getExceptions(scheduleId)
+
+    suspend fun getExpandedSchedules(rangeStart: Long, rangeEnd: Long): List<ScheduleOccurrence> =
+        expandScheduleOccurrences(schedules.getAll(), recurrence.getRules(), recurrence.getExceptions(), rangeStart, rangeEnd)
 
     suspend fun createCandidate(rawText: String, sourceApp: String?, receivedAt: Long): AppointmentCandidateEntity {
         val parsed = parser.parse(rawText, receivedAt)
@@ -62,6 +81,7 @@ class PlannerRepository(
         selectedStatus: ScheduleStatus,
         titleOverride: String?,
         force: Boolean = false,
+        recurrenceInput: RecurrenceInput = RecurrenceInput.None,
     ): SaveResult = db.withTransaction {
         val candidate = candidates.get(candidateId) ?: return@withTransaction SaveResult.MissingCandidate
         if (candidate.status != CandidateStatus.Pending.dbValue) {
@@ -90,6 +110,7 @@ class PlannerRepository(
         }
 
         val schedule = insertSchedule(titledCandidate, selectedStatus, title)
+        saveRecurrence(schedule, recurrenceInput)
         candidates.update(titledCandidate.copy(status = CandidateStatus.Confirmed.dbValue))
         SaveResult.Saved(schedule)
     }
@@ -120,11 +141,12 @@ class PlannerRepository(
         location: String?,
         memo: String?,
         status: ScheduleStatus,
+        recurrenceInput: RecurrenceInput? = null,
     ): Boolean {
         val schedule = schedules.get(scheduleId) ?: return false
         val cleanTitle = title.trim().takeIf { it.isNotBlank() } ?: return false
-        schedules.update(
-            schedule.copy(
+        db.withTransaction {
+            val updatedSchedule = schedule.copy(
                 title = cleanTitle,
                 startAt = startAt ?: schedule.startAt,
                 endAt = endAt,
@@ -132,9 +154,23 @@ class PlannerRepository(
                 memo = memo?.ifBlank { null },
                 status = status.dbValue,
                 updatedAt = System.currentTimeMillis(),
+            )
+            schedules.update(updatedSchedule)
+            recurrenceInput?.let { saveRecurrence(updatedSchedule, it) }
+        }
+        return true
+    }
+
+    suspend fun skipRecurringOccurrence(scheduleId: String, occurrenceStartAt: Long) {
+        val now = System.currentTimeMillis()
+        recurrence.upsertException(
+            ScheduleRecurrenceExceptionEntity(
+                scheduleId = scheduleId,
+                occurrenceStartAt = occurrenceStartAt,
+                action = RecurrenceExceptionActionSkip,
+                createdAt = now,
             ),
         )
-        return true
     }
 
     suspend fun discardCandidate(candidateId: String) {
@@ -172,6 +208,102 @@ class PlannerRepository(
             )
         schedules.insert(schedule)
         return schedule
+    }
+
+    private suspend fun saveRecurrence(schedule: ScheduleEntity, recurrenceInput: RecurrenceInput) {
+        when (recurrenceInput) {
+            RecurrenceInput.None -> recurrence.deleteRule(schedule.id)
+            is RecurrenceInput.Weekly -> {
+                val now = System.currentTimeMillis()
+                val dayOfWeek = Instant.ofEpochMilli(schedule.startAt).atZone(scheduleZone).dayOfWeek.value
+                recurrence.upsertRule(
+                    ScheduleRecurrenceRuleEntity(
+                        scheduleId = schedule.id,
+                        frequency = RecurrenceFrequencyWeekly,
+                        intervalWeeks = 1,
+                        dayOfWeek = dayOfWeek,
+                        untilAt = recurrenceInput.untilAt,
+                        count = recurrenceInput.count,
+                        createdAt = recurrence.getRule(schedule.id)?.createdAt ?: now,
+                        updatedAt = now,
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun expandScheduleOccurrences(
+        savedSchedules: List<ScheduleEntity>,
+        rules: List<ScheduleRecurrenceRuleEntity>,
+        exceptions: List<ScheduleRecurrenceExceptionEntity>,
+        rangeStart: Long,
+        rangeEnd: Long,
+    ): List<ScheduleOccurrence> {
+        val rulesByScheduleId = rules.associateBy { it.scheduleId }
+        val skipped = exceptions
+            .filter { it.action == RecurrenceExceptionActionSkip }
+            .map { it.scheduleId to it.occurrenceStartAt }
+            .toSet()
+
+        return savedSchedules.flatMap { schedule ->
+            val rule = rulesByScheduleId[schedule.id]
+            if (rule == null) {
+                if (schedule.startAt in rangeStart until rangeEnd) {
+                    listOf(ScheduleOccurrence(schedule, schedule.id, schedule.startAt, isRecurring = false))
+                } else {
+                    emptyList()
+                }
+            } else {
+                expandWeeklySchedule(schedule, rule, skipped, rangeStart, rangeEnd)
+            }
+        }.sortedWith(compareBy<ScheduleOccurrence> { it.schedule.startAt }.thenBy { it.schedule.title })
+    }
+
+    private fun expandWeeklySchedule(
+        schedule: ScheduleEntity,
+        rule: ScheduleRecurrenceRuleEntity,
+        skipped: Set<Pair<String, Long>>,
+        rangeStart: Long,
+        rangeEnd: Long,
+    ): List<ScheduleOccurrence> {
+        if (rule.frequency != RecurrenceFrequencyWeekly || rule.intervalWeeks < 1) return emptyList()
+        val firstStart = Instant.ofEpochMilli(schedule.startAt).atZone(scheduleZone)
+        val rangeStartDate = Instant.ofEpochMilli(rangeStart).atZone(scheduleZone).toLocalDate()
+        val weeksBetween = ChronoUnit.WEEKS.between(firstStart.toLocalDate(), rangeStartDate).coerceAtLeast(0)
+        var occurrenceIndex = weeksBetween / rule.intervalWeeks
+        var occurrenceStart = firstStart.plusWeeks(occurrenceIndex * rule.intervalWeeks.toLong())
+        while (occurrenceStart.toInstant().toEpochMilli() < rangeStart) {
+            occurrenceIndex += 1
+            occurrenceStart = occurrenceStart.plusWeeks(rule.intervalWeeks.toLong())
+        }
+
+        val occurrences = mutableListOf<ScheduleOccurrence>()
+        while (occurrenceStart.toInstant().toEpochMilli() < rangeEnd) {
+            val occurrenceStartAt = occurrenceStart.toInstant().toEpochMilli()
+            if (rule.count != null && occurrenceIndex >= rule.count) break
+            if (rule.untilAt != null && occurrenceStartAt > rule.untilAt) break
+            if (occurrenceStart.dayOfWeek == DayOfWeek.of(rule.dayOfWeek) && (schedule.id to occurrenceStartAt) !in skipped) {
+                val delta = occurrenceStartAt - schedule.startAt
+                occurrences += ScheduleOccurrence(
+                    schedule = schedule.copy(
+                        startAt = occurrenceStartAt,
+                        endAt = schedule.endAt?.plus(delta),
+                    ),
+                    scheduleId = schedule.id,
+                    occurrenceStartAt = occurrenceStartAt,
+                    isRecurring = true,
+                )
+            }
+            occurrenceIndex += 1
+            occurrenceStart = occurrenceStart.plusWeeks(rule.intervalWeeks.toLong())
+        }
+        return occurrences
+    }
+
+    companion object {
+        private val scheduleZone: ZoneId = ZoneId.of("Asia/Seoul")
+        private const val RecurrenceFrequencyWeekly = "weekly"
+        private const val RecurrenceExceptionActionSkip = "skip"
     }
 }
 

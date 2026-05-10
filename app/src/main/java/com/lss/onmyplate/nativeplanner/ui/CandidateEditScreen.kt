@@ -14,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lss.onmyplate.nativeplanner.OnMyPlateApp
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
+import com.lss.onmyplate.nativeplanner.data.repository.RecurrenceInput
 import com.lss.onmyplate.nativeplanner.data.repository.SaveResult
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
 import kotlinx.coroutines.launch
@@ -34,6 +35,8 @@ fun CandidateEditScreen(
     var endAt by remember(candidate?.id) { mutableStateOf(candidate?.extractedEndAt) }
     var location by remember(candidate?.id) { mutableStateOf(candidate?.extractedLocation.orEmpty()) }
     var status by remember(candidate?.id) { mutableStateOf(ScheduleStatus.Confirmed) }
+    var repeatsWeekly by remember(candidate?.id) { mutableStateOf(candidate?.rawText?.contains("매주") == true) }
+    var repeatUntilAt by remember(candidate?.id) { mutableStateOf<Long?>(null) }
     val canSave = title.isNotBlank()
 
     if (candidate == null) {
@@ -74,6 +77,13 @@ fun CandidateEditScreen(
             DateTimePickerField(startAt, { startAt = it }, "시작 날짜/시간", required = false)
             DateTimePickerField(endAt, { endAt = it }, "종료 날짜/시간", required = false)
             BasketTextField(location, { location = it }, "장소")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("매주 반복", style = MaterialTheme.typography.bodyLarge)
+                Switch(checked = repeatsWeekly, onCheckedChange = { repeatsWeekly = it })
+            }
+            if (repeatsWeekly) {
+                DateTimePickerField(repeatUntilAt, { repeatUntilAt = it }, "반복 종료", required = false)
+            }
         }
 
         Text("원문", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -93,7 +103,12 @@ fun CandidateEditScreen(
                 onClick = {
                     scope.launch {
                         repository.updateCandidate(candidateId, title, startAt, endAt, location)
-                        when (val result = repository.saveFromCandidate(candidateId, status, title)) {
+                        val recurrenceInput = if (repeatsWeekly) {
+                            RecurrenceInput.Weekly(untilAt = repeatUntilAt)
+                        } else {
+                            RecurrenceInput.None
+                        }
+                        when (val result = repository.saveFromCandidate(candidateId, status, title, recurrenceInput = recurrenceInput)) {
                             is SaveResult.Conflict -> onConflict()
                             is SaveResult.Saved -> {
                                 app.syncScheduleAsync(result.schedule)

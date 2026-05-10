@@ -2,6 +2,22 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 type JsonObject = { [key: string]: JsonValue };
+type SchedulePayload = {
+  schedule: JsonObject;
+  recurrence: RecurrenceRuleInput | null;
+  recurrenceExceptions: RecurrenceExceptionInput[];
+};
+type RecurrenceRuleInput = {
+  frequency: "weekly";
+  intervalWeeks: number;
+  dayOfWeek: number;
+  untilAt: string | null;
+  count: number | null;
+};
+type RecurrenceExceptionInput = {
+  occurrenceStartAt: string;
+  action: "skip";
+};
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -283,31 +299,55 @@ async function listGroups(userId: string): Promise<Response> {
 
 async function uploadSharedSchedule(userId: string, groupId: string, request: Request): Promise<Response> {
   await requireGroupMember(userId, groupId);
-  const schedule = await readScheduleJson(request);
+  const payload = await readSchedulePayload(request);
   const { data, error } = await db
     .from("planner_schedules")
     .upsert(
-      { ...schedule, group_id: groupId, created_by: userId },
+      { ...payload.schedule, group_id: groupId, created_by: userId },
       { onConflict: "group_id,created_by,local_schedule_id" },
     )
     .select()
     .single();
   if (error) throw apiError(500, error.message);
-  return jsonResponse({ schedule: toScheduleJson(data) });
+  await saveScheduleRecurrence(
+    String(data.id),
+    payload.recurrence,
+    payload.recurrenceExceptions,
+    "planner_schedule_recurrence_rules",
+    "planner_schedule_recurrence_exceptions",
+  );
+  const schedule = await attachRecurrenceToSchedules(
+    [{ ...data, is_dummy: false }],
+    "planner_schedule_recurrence_rules",
+    "planner_schedule_recurrence_exceptions",
+  );
+  return jsonResponse({ schedule: toScheduleJson(schedule[0]) });
 }
 
 async function uploadPersonalSchedule(userId: string, request: Request): Promise<Response> {
-  const schedule = await readScheduleJson(request);
+  const payload = await readSchedulePayload(request);
   const { data, error } = await db
     .from("planner_personal_schedules")
     .upsert(
-      { ...schedule, created_by: userId },
+      { ...payload.schedule, created_by: userId },
       { onConflict: "created_by,local_schedule_id" },
     )
     .select()
     .single();
   if (error) throw apiError(500, error.message);
-  return jsonResponse({ schedule: toScheduleJson(data) });
+  await saveScheduleRecurrence(
+    String(data.id),
+    payload.recurrence,
+    payload.recurrenceExceptions,
+    "planner_personal_schedule_recurrence_rules",
+    "planner_personal_schedule_recurrence_exceptions",
+  );
+  const schedule = await attachRecurrenceToSchedules(
+    [{ ...data, is_dummy: false }],
+    "planner_personal_schedule_recurrence_rules",
+    "planner_personal_schedule_recurrence_exceptions",
+  );
+  return jsonResponse({ schedule: toScheduleJson(schedule[0]) });
 }
 
 async function listSharedSchedules(userId: string, groupId: string, includeDummy: boolean): Promise<Response> {
@@ -319,7 +359,12 @@ async function listSharedSchedules(userId: string, groupId: string, includeDummy
     .order("start_at", { ascending: true });
   if (error) throw apiError(500, error.message);
 
-  let all = (schedules ?? []).map((item) => toScheduleJson({ ...item, is_dummy: false }));
+  const shared = await attachRecurrenceToSchedules(
+    (schedules ?? []).map((item) => ({ ...item, is_dummy: false })),
+    "planner_schedule_recurrence_rules",
+    "planner_schedule_recurrence_exceptions",
+  );
+  let all = shared.map(toScheduleJson);
   if (includeDummy) {
     const { data: dummy, error: dummyError } = await db
       .from("planner_dummy_schedules")
@@ -419,20 +464,140 @@ async function requireUserId(request: Request): Promise<string> {
   return normalizeIdentifier(match[1].trim());
 }
 
-async function readScheduleJson(request: Request): Promise<JsonObject> {
+async function readSchedulePayload(request: Request): Promise<SchedulePayload> {
   const body = await readJson(request);
   return {
-    local_schedule_id: optionalString(body.localScheduleId),
-    title: requiredString(body.title, "일정 제목을 입력하세요."),
-    start_at: requiredString(body.startAt, "시작 시간이 필요합니다."),
-    end_at: optionalString(body.endAt),
-    location: optionalString(body.location),
-    memo: optionalString(body.memo),
-    status: optionalString(body.status) ?? "planned",
-    source_text: optionalString(body.sourceText),
-    source_app: optionalString(body.sourceApp),
-    updated_at: new Date().toISOString(),
+    schedule: {
+      local_schedule_id: optionalString(body.localScheduleId),
+      title: requiredString(body.title, "일정 제목을 입력하세요."),
+      start_at: requiredString(body.startAt, "시작 시간이 필요합니다."),
+      end_at: optionalString(body.endAt),
+      location: optionalString(body.location),
+      memo: optionalString(body.memo),
+      status: optionalString(body.status) ?? "planned",
+      source_text: optionalString(body.sourceText),
+      source_app: optionalString(body.sourceApp),
+      updated_at: new Date().toISOString(),
+    },
+    recurrence: readRecurrenceRule(body.recurrence),
+    recurrenceExceptions: readRecurrenceExceptions(body.recurrenceExceptions),
   };
+}
+
+function readRecurrenceRule(value: unknown): RecurrenceRuleInput | null {
+  if (value == null) return null;
+  if (!isPlainObject(value)) throw apiError(400, "recurrence must be an object or null.");
+  const frequency = optionalString(value.frequency) ?? "weekly";
+  if (frequency !== "weekly") throw apiError(400, "Only weekly recurrence is supported.");
+  const intervalWeeks = optionalPositiveInteger(value.intervalWeeks, 1);
+  const dayOfWeek = optionalPositiveInteger(value.dayOfWeek, 0);
+  if (dayOfWeek < 1 || dayOfWeek > 7) throw apiError(400, "recurrence.dayOfWeek must be 1-7.");
+  return {
+    frequency,
+    intervalWeeks,
+    dayOfWeek,
+    untilAt: optionalString(value.untilAt),
+    count: optionalPositiveIntegerOrNull(value.count),
+  };
+}
+
+function readRecurrenceExceptions(value: unknown): RecurrenceExceptionInput[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw apiError(400, "recurrenceExceptions must be an array.");
+  return value.map((item) => {
+    if (!isPlainObject(item)) throw apiError(400, "recurrenceExceptions entries must be objects.");
+    const action = optionalString(item.action) ?? "skip";
+    if (action !== "skip") throw apiError(400, "Only skip recurrence exceptions are supported.");
+    return {
+      occurrenceStartAt: requiredString(item.occurrenceStartAt, "recurrence exception occurrenceStartAt is required."),
+      action,
+    };
+  });
+}
+
+async function saveScheduleRecurrence(
+  scheduleId: string,
+  recurrence: RecurrenceRuleInput | null,
+  exceptions: RecurrenceExceptionInput[],
+  ruleTable: string,
+  exceptionTable: string,
+): Promise<void> {
+  if (!recurrence) {
+    const { error: deleteExceptionsError } = await db.from(exceptionTable).delete().eq("schedule_id", scheduleId);
+    if (deleteExceptionsError) throw apiError(500, deleteExceptionsError.message);
+    const { error: deleteRuleError } = await db.from(ruleTable).delete().eq("schedule_id", scheduleId);
+    if (deleteRuleError) throw apiError(500, deleteRuleError.message);
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const { error: ruleError } = await db
+    .from(ruleTable)
+    .upsert(
+      {
+        schedule_id: scheduleId,
+        frequency: recurrence.frequency,
+        interval_weeks: recurrence.intervalWeeks,
+        day_of_week: recurrence.dayOfWeek,
+        until_at: recurrence.untilAt,
+        count: recurrence.count,
+        updated_at: now,
+      },
+      { onConflict: "schedule_id" },
+    );
+  if (ruleError) throw apiError(500, ruleError.message);
+
+  const { error: deleteExceptionsError } = await db.from(exceptionTable).delete().eq("schedule_id", scheduleId);
+  if (deleteExceptionsError) throw apiError(500, deleteExceptionsError.message);
+  if (exceptions.length === 0) return;
+
+  const { error: exceptionsError } = await db.from(exceptionTable).insert(
+    exceptions.map((exception) => ({
+      schedule_id: scheduleId,
+      occurrence_start_at: exception.occurrenceStartAt,
+      action: exception.action,
+    })),
+  );
+  if (exceptionsError) throw apiError(500, exceptionsError.message);
+}
+
+async function attachRecurrenceToSchedules(
+  schedules: Array<Record<string, unknown>>,
+  ruleTable: string,
+  exceptionTable: string,
+): Promise<Array<Record<string, unknown>>> {
+  const ids = schedules.map((schedule) => String(schedule.id));
+  if (ids.length === 0) return schedules;
+
+  const { data: rules, error: rulesError } = await db
+    .from(ruleTable)
+    .select("schedule_id,frequency,interval_weeks,day_of_week,until_at,count")
+    .in("schedule_id", ids);
+  if (rulesError) throw apiError(500, rulesError.message);
+
+  const { data: exceptions, error: exceptionsError } = await db
+    .from(exceptionTable)
+    .select("schedule_id,occurrence_start_at,action")
+    .in("schedule_id", ids);
+  if (exceptionsError) throw apiError(500, exceptionsError.message);
+
+  const rulesByScheduleId = new Map((rules ?? []).map((rule) => [String(rule.schedule_id), rule]));
+  const exceptionsByScheduleId = new Map<string, Record<string, unknown>[]>();
+  for (const exception of exceptions ?? []) {
+    const scheduleId = String(exception.schedule_id);
+    const existing = exceptionsByScheduleId.get(scheduleId) ?? [];
+    existing.push(exception);
+    exceptionsByScheduleId.set(scheduleId, existing);
+  }
+
+  return schedules.map((schedule) => {
+    const scheduleId = String(schedule.id);
+    return {
+      ...schedule,
+      recurrence: recurrenceRuleToJson(rulesByScheduleId.get(scheduleId)),
+      recurrence_exceptions: (exceptionsByScheduleId.get(scheduleId) ?? []).map(recurrenceExceptionToJson),
+    };
+  });
 }
 
 async function readJson(request: Request): Promise<Record<string, unknown>> {
@@ -466,6 +631,23 @@ function optionalString(value: unknown): string | null {
   return trimmed.length === 0 || trimmed === "null" ? null : value;
 }
 
+function optionalPositiveInteger(value: unknown, fallback: number): number {
+  if (value == null) return fallback;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw apiError(400, "Expected a positive integer.");
+  }
+  return value;
+}
+
+function optionalPositiveIntegerOrNull(value: unknown): number | null {
+  if (value == null) return null;
+  return optionalPositiveInteger(value, 0);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function toGroupJson(group: { id: string; name: string }): JsonObject {
   return { groupId: group.id, id: group.id, name: group.name };
 }
@@ -479,6 +661,26 @@ function toScheduleJson(schedule: Record<string, unknown>): JsonObject {
     location: optionalString(schedule.location),
     status: optionalString(schedule.status) ?? "planned",
     isDummy: Boolean(schedule.is_dummy),
+    recurrence: (schedule.recurrence as JsonObject | null | undefined) ?? null,
+    recurrenceExceptions: (schedule.recurrence_exceptions as JsonValue[] | undefined) ?? [],
+  };
+}
+
+function recurrenceRuleToJson(rule: Record<string, unknown> | undefined): JsonObject | null {
+  if (!rule) return null;
+  return {
+    frequency: optionalString(rule.frequency) ?? "weekly",
+    intervalWeeks: Number(rule.interval_weeks),
+    dayOfWeek: Number(rule.day_of_week),
+    untilAt: optionalString(rule.until_at),
+    count: typeof rule.count === "number" ? rule.count : null,
+  };
+}
+
+function recurrenceExceptionToJson(exception: Record<string, unknown>): JsonObject {
+  return {
+    occurrenceStartAt: String(exception.occurrence_start_at),
+    action: optionalString(exception.action) ?? "skip",
   };
 }
 

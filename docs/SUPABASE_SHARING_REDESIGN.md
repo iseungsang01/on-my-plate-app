@@ -173,7 +173,20 @@ Content-Type: application/json
   "memo": null,
   "status": "confirmed",
   "sourceText": "...",
-  "sourceApp": "internal"
+  "sourceApp": "internal",
+  "recurrence": {
+    "frequency": "weekly",
+    "intervalWeeks": 1,
+    "dayOfWeek": 2,
+    "untilAt": "2026-08-31T14:59:59Z",
+    "count": null
+  },
+  "recurrenceExceptions": [
+    {
+      "occurrenceStartAt": "2026-05-12T01:00:00Z",
+      "action": "skip"
+    }
+  ]
 }
 ```
 
@@ -182,6 +195,9 @@ Content-Type: application/json
 - 로그인 검증
 - 내가 해당 groupId의 멤버인지 확인
 - `planner_schedules`에 upsert
+- `recurrence`가 있으면 `planner_schedule_recurrence_rules`에 upsert
+- `recurrenceExceptions`는 해당 일정 기준으로 replace
+- `recurrence`가 없거나 null이면 해당 일정의 반복 규칙/예외 삭제
 
 ### 5. 공유 일정 조회
 
@@ -195,8 +211,9 @@ Authorization: Bearer <existing-app-session-token>
 - 로그인 검증
 - 내가 groupId 멤버인지 확인
 - `planner_schedules` 조회
+- 공유 일정에는 `recurrence`, `recurrenceExceptions` 포함
 - `includeDummy=true`이면 `planner_dummy_schedules`도 함께 조회
-- 더미 일정에는 `isDummy: true` 표시
+- 더미 일정에는 `isDummy: true`, `recurrence: null`, `recurrenceExceptions: []` 표시
 
 ---
 
@@ -248,6 +265,25 @@ create table if not exists public.planner_schedules (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (group_id, created_by, local_schedule_id)
+);
+
+create table if not exists public.planner_schedule_recurrence_rules (
+  schedule_id uuid primary key references public.planner_schedules(id) on delete cascade,
+  frequency text not null check (frequency in ('weekly')),
+  interval_weeks integer not null default 1 check (interval_weeks >= 1),
+  day_of_week integer not null check (day_of_week between 1 and 7),
+  until_at timestamptz,
+  count integer check (count is null or count > 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.planner_schedule_recurrence_exceptions (
+  schedule_id uuid not null references public.planner_schedules(id) on delete cascade,
+  occurrence_start_at timestamptz not null,
+  action text not null check (action in ('skip')),
+  created_at timestamptz not null default now(),
+  primary key (schedule_id, occurrence_start_at)
 );
 
 create table if not exists public.planner_dummy_schedules (

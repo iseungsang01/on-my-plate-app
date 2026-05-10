@@ -3,6 +3,8 @@
 import android.content.Context
 import com.lss.onmyplate.nativeplanner.BuildConfig
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
+import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceExceptionEntity
+import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceRuleEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -44,12 +46,21 @@ class SharingRepository(context: Context) {
         client.listGroups(sessionToken())
     }
 
-    suspend fun uploadSchedule(groupId: String, schedule: ScheduleEntity): Unit = withContext(Dispatchers.IO) {
-        client.uploadSchedule(sessionToken(), groupId, schedule)
+    suspend fun uploadSchedule(
+        groupId: String,
+        schedule: ScheduleEntity,
+        recurrenceRule: ScheduleRecurrenceRuleEntity? = null,
+        recurrenceExceptions: List<ScheduleRecurrenceExceptionEntity> = emptyList(),
+    ): Unit = withContext(Dispatchers.IO) {
+        client.uploadSchedule(sessionToken(), groupId, schedule, recurrenceRule, recurrenceExceptions)
     }
 
-    suspend fun uploadPersonalSchedule(schedule: ScheduleEntity): Unit = withContext(Dispatchers.IO) {
-        client.uploadPersonalSchedule(sessionToken(), schedule)
+    suspend fun uploadPersonalSchedule(
+        schedule: ScheduleEntity,
+        recurrenceRule: ScheduleRecurrenceRuleEntity? = null,
+        recurrenceExceptions: List<ScheduleRecurrenceExceptionEntity> = emptyList(),
+    ): Unit = withContext(Dispatchers.IO) {
+        client.uploadPersonalSchedule(sessionToken(), schedule, recurrenceRule, recurrenceExceptions)
     }
 
     suspend fun listSharedSchedules(groupId: String, includeDummy: Boolean): List<SharedSchedule> = withContext(Dispatchers.IO) {
@@ -79,6 +90,19 @@ data class SharedSchedule(
     val location: String?,
     val status: String,
     val isDummy: Boolean,
+    val recurrence: SharedScheduleRecurrence?,
+    val recurrenceExceptions: List<SharedScheduleRecurrenceException>,
+)
+data class SharedScheduleRecurrence(
+    val frequency: String,
+    val intervalWeeks: Int,
+    val dayOfWeek: Int,
+    val untilAt: Long?,
+    val count: Int?,
+)
+data class SharedScheduleRecurrenceException(
+    val occurrenceStartAt: Long,
+    val action: String,
 )
 
 private class PlannerShareApiClient(private val rawBaseUrl: String) {
@@ -102,12 +126,28 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
         return parseArrayEnvelope(text, "groups").map { it.toShareGroup() }
     }
 
-    fun uploadSchedule(token: String, groupId: String, schedule: ScheduleEntity) {
-        request("POST", "/api/planner/share/groups/${url(groupId)}/schedules", token, schedule.toApiJson())
+    fun uploadSchedule(
+        token: String,
+        groupId: String,
+        schedule: ScheduleEntity,
+        recurrenceRule: ScheduleRecurrenceRuleEntity?,
+        recurrenceExceptions: List<ScheduleRecurrenceExceptionEntity>,
+    ) {
+        request(
+            "POST",
+            "/api/planner/share/groups/${url(groupId)}/schedules",
+            token,
+            schedule.toApiJson(recurrenceRule, recurrenceExceptions),
+        )
     }
 
-    fun uploadPersonalSchedule(token: String, schedule: ScheduleEntity) {
-        request("POST", "/api/planner/schedules", token, schedule.toApiJson())
+    fun uploadPersonalSchedule(
+        token: String,
+        schedule: ScheduleEntity,
+        recurrenceRule: ScheduleRecurrenceRuleEntity?,
+        recurrenceExceptions: List<ScheduleRecurrenceExceptionEntity>,
+    ) {
+        request("POST", "/api/planner/schedules", token, schedule.toApiJson(recurrenceRule, recurrenceExceptions))
     }
 
     fun listSchedules(token: String, groupId: String, includeDummy: Boolean): List<SharedSchedule> {
@@ -122,7 +162,10 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
             .sortedBy { it.startAt }
     }
 
-    private fun ScheduleEntity.toApiJson(): JSONObject = JSONObject()
+    private fun ScheduleEntity.toApiJson(
+        recurrenceRule: ScheduleRecurrenceRuleEntity?,
+        recurrenceExceptions: List<ScheduleRecurrenceExceptionEntity>,
+    ): JSONObject = JSONObject()
         .put("localScheduleId", id)
         .put("title", title)
         .put("startAt", Instant.ofEpochMilli(startAt).toString())
@@ -132,6 +175,13 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
         .put("status", status)
         .put("sourceText", sourceText ?: JSONObject.NULL)
         .put("sourceApp", sourceApp ?: JSONObject.NULL)
+        .put("recurrence", recurrenceRule?.toApiJson() ?: JSONObject.NULL)
+        .put(
+            "recurrenceExceptions",
+            JSONArray().also { array ->
+                recurrenceExceptions.forEach { array.put(it.toApiJson()) }
+            },
+        )
 
     private fun request(method: String, path: String, token: String, body: JSONObject?): String {
         require(isConfigured()) { "Planner share API is not configured." }
@@ -189,7 +239,43 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
         location = optNullableString("location"),
         status = optString("status", "planned"),
         isDummy = optBoolean("isDummy", optBoolean("is_dummy", false)),
+        recurrence = optJSONObject("recurrence")?.toSharedScheduleRecurrence(),
+        recurrenceExceptions = optJSONArray("recurrenceExceptions", "recurrence_exceptions").toRecurrenceExceptions(),
     )
+
+    private fun ScheduleRecurrenceRuleEntity.toApiJson(): JSONObject = JSONObject()
+        .put("frequency", frequency)
+        .put("intervalWeeks", intervalWeeks)
+        .put("dayOfWeek", dayOfWeek)
+        .put("untilAt", untilAt?.let { Instant.ofEpochMilli(it).toString() } ?: JSONObject.NULL)
+        .put("count", count ?: JSONObject.NULL)
+
+    private fun ScheduleRecurrenceExceptionEntity.toApiJson(): JSONObject = JSONObject()
+        .put("occurrenceStartAt", Instant.ofEpochMilli(occurrenceStartAt).toString())
+        .put("action", action)
+
+    private fun JSONObject.toSharedScheduleRecurrence(): SharedScheduleRecurrence = SharedScheduleRecurrence(
+        frequency = optString("frequency", "weekly"),
+        intervalWeeks = optInt("intervalWeeks", optInt("interval_weeks", 1)),
+        dayOfWeek = optInt("dayOfWeek", optInt("day_of_week", 1)),
+        untilAt = optNullableString("untilAt", "until_at")?.let { parseInstantMillis(it) },
+        count = if (has("count") && !isNull("count")) optInt("count") else null,
+    )
+
+    private fun JSONArray?.toRecurrenceExceptions(): List<SharedScheduleRecurrenceException> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (i in 0 until length()) {
+                val item = getJSONObject(i)
+                add(
+                    SharedScheduleRecurrenceException(
+                        occurrenceStartAt = parseInstantMillis(item.optRequiredString("occurrenceStartAt", "occurrence_start_at")),
+                        action = item.optString("action", "skip"),
+                    ),
+                )
+            }
+        }
+    }
 
     private fun JSONObject.optRequiredString(vararg names: String): String {
         names.forEach { name ->
@@ -204,6 +290,13 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
                 val value = optString(name).takeIf { it.isNotBlank() && it != "null" }
                 if (value != null) return value
             }
+        }
+        return null
+    }
+
+    private fun JSONObject.optJSONArray(vararg names: String): JSONArray? {
+        names.forEach { name ->
+            if (has(name) && !isNull(name)) return optJSONArray(name)
         }
         return null
     }

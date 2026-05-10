@@ -151,7 +151,7 @@ sealed interface Route {
     data object Sharing : Route
     data object Settings : Route
     data object Login : Route
-    data class ScheduleEdit(val scheduleId: String) : Route
+    data class ScheduleEdit(val scheduleId: String, val occurrenceStartAt: Long? = null) : Route
     data class Candidate(val candidateId: String) : Route
     data class Conflict(val candidateId: String) : Route
     data class Complete(val candidateId: String) : Route
@@ -170,7 +170,9 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit) {
     when (route) {
         Route.Login -> LoginScreen(authRepository = app.authRepository, onAuthenticated = { onRoute(Route.Schedule) })
         Route.Schedule -> MascotScaffold(selected = MainTab.Schedule, onRoute = onRoute) {
-            WeeklyScheduleScreen(repository = app.repository, onOpenSchedule = { onRoute(Route.ScheduleEdit(it)) })
+            WeeklyScheduleScreen(repository = app.repository, onOpenSchedule = { scheduleId, occurrenceStartAt ->
+                onRoute(Route.ScheduleEdit(scheduleId, occurrenceStartAt))
+            })
         }
         Route.Basket -> MascotScaffold(selected = MainTab.Basket, onRoute = onRoute) {
             BasketScreen(repository = app.repository, onOpenCandidate = { onRoute(Route.Candidate(it)) })
@@ -192,6 +194,7 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit) {
         is Route.ScheduleEdit -> ScheduleEditScreen(
             repository = app.repository,
             scheduleId = route.scheduleId,
+            occurrenceStartAt = route.occurrenceStartAt,
             onBack = { onRoute(Route.Schedule) },
         )
         is Route.Candidate -> CandidateEditScreen(

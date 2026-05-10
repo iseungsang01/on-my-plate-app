@@ -8,17 +8,26 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.lss.onmyplate.nativeplanner.data.dao.AppointmentCandidateDao
 import com.lss.onmyplate.nativeplanner.data.dao.ScheduleDao
+import com.lss.onmyplate.nativeplanner.data.dao.ScheduleRecurrenceDao
 import com.lss.onmyplate.nativeplanner.data.entity.AppointmentCandidateEntity
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
+import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceExceptionEntity
+import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceRuleEntity
 
 @Database(
-    entities = [ScheduleEntity::class, AppointmentCandidateEntity::class],
-    version = 2,
+    entities = [
+        ScheduleEntity::class,
+        AppointmentCandidateEntity::class,
+        ScheduleRecurrenceRuleEntity::class,
+        ScheduleRecurrenceExceptionEntity::class,
+    ],
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun scheduleDao(): ScheduleDao
     abstract fun appointmentCandidateDao(): AppointmentCandidateDao
+    abstract fun scheduleRecurrenceDao(): ScheduleRecurrenceDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -29,9 +38,44 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `schedule_recurrence_rules` (
+                        `scheduleId` TEXT NOT NULL,
+                        `frequency` TEXT NOT NULL,
+                        `intervalWeeks` INTEGER NOT NULL,
+                        `dayOfWeek` INTEGER NOT NULL,
+                        `untilAt` INTEGER,
+                        `count` INTEGER,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`scheduleId`),
+                        FOREIGN KEY(`scheduleId`) REFERENCES `schedules`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_schedule_recurrence_rules_scheduleId` ON `schedule_recurrence_rules` (`scheduleId`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `schedule_recurrence_exceptions` (
+                        `scheduleId` TEXT NOT NULL,
+                        `occurrenceStartAt` INTEGER NOT NULL,
+                        `action` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`scheduleId`, `occurrenceStartAt`),
+                        FOREIGN KEY(`scheduleId`) REFERENCES `schedules`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_schedule_recurrence_exceptions_scheduleId` ON `schedule_recurrence_exceptions` (`scheduleId`)")
+            }
+        }
+
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "on_my_plate_native.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
 
         private fun SupportSQLiteDatabase.hasColumn(tableName: String, columnName: String): Boolean {

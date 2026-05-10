@@ -7,6 +7,8 @@ import com.lss.onmyplate.nativeplanner.domain.model.CandidateStatus
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
 import com.lss.onmyplate.nativeplanner.domain.parser.KoreanAppointmentParser
 import kotlinx.coroutines.runBlocking
+import java.time.LocalDateTime
+import java.time.ZoneId
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -22,6 +24,7 @@ import org.robolectric.RobolectricTestRunner
 class PlannerRepositoryTest {
     private lateinit var db: AppDatabase
     private lateinit var repository: PlannerRepository
+    private val zoneId = ZoneId.of("Asia/Seoul")
 
     @Before
     fun setUp() {
@@ -126,4 +129,35 @@ class PlannerRepositoryTest {
         assertEquals(1, db.scheduleDao().getAll().size)
         assertEquals(CandidateStatus.Pending.dbValue, db.appointmentCandidateDao().get(second.id)?.status)
     }
+
+    @Test
+    fun weeklyRecurrenceExpandsAndCanSkipOneOccurrence() = runBlocking {
+        val candidate = repository.createCandidate("weekly class", "internal", receivedAt = 1L)
+        val firstStart = epochMillis(2026, 5, 5, 10, 0)
+        val firstEnd = epochMillis(2026, 5, 5, 11, 0)
+        repository.updateCandidate(candidate.id, "Class", firstStart, firstEnd, "Room")
+
+        val result = repository.saveFromCandidate(
+            candidateId = candidate.id,
+            selectedStatus = ScheduleStatus.Confirmed,
+            titleOverride = null,
+            recurrenceInput = RecurrenceInput.Weekly(),
+        )
+
+        assertTrue(result is SaveResult.Saved)
+        val schedule = (result as SaveResult.Saved).schedule
+        val rangeStart = epochMillis(2026, 5, 4, 0, 0)
+        val rangeEnd = epochMillis(2026, 5, 18, 0, 0)
+        val beforeSkip = repository.getExpandedSchedules(rangeStart, rangeEnd)
+        assertEquals(listOf(firstStart, epochMillis(2026, 5, 12, 10, 0)), beforeSkip.map { it.occurrenceStartAt })
+        assertTrue(beforeSkip.all { it.isRecurring })
+
+        repository.skipRecurringOccurrence(schedule.id, epochMillis(2026, 5, 12, 10, 0))
+
+        val afterSkip = repository.getExpandedSchedules(rangeStart, rangeEnd)
+        assertEquals(listOf(firstStart), afterSkip.map { it.occurrenceStartAt })
+    }
+
+    private fun epochMillis(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =
+        LocalDateTime.of(year, month, day, hour, minute).atZone(zoneId).toInstant().toEpochMilli()
 }

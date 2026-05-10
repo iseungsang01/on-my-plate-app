@@ -14,6 +14,10 @@ import com.lss.onmyplate.nativeplanner.widget.PlannerWidgetSync
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.temporal.TemporalAdjusters
 
 class OnMyPlateApp : Application() {
     val appScope = CoroutineScope(SupervisorJob())
@@ -37,7 +41,11 @@ class OnMyPlateApp : Application() {
         appScope.launch {
             runCatching {
                 if (sharingRepository.isConfigured() && sharingRepository.hasCachedSession()) {
-                    sharingRepository.uploadPersonalSchedule(schedule)
+                    sharingRepository.uploadPersonalSchedule(
+                        schedule = schedule,
+                        recurrenceRule = repository.getRecurrenceRule(schedule.id),
+                        recurrenceExceptions = repository.getRecurrenceExceptions(schedule.id),
+                    )
                 }
             }
         }
@@ -48,7 +56,11 @@ class OnMyPlateApp : Application() {
         instance = this
         notifications.ensureChannels()
         appScope.launch {
-            repository.observeSchedules().collect { schedules ->
+            val zone = ZoneId.of("Asia/Seoul")
+            val weekStart = LocalDate.now(zone).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+            val rangeStart = weekStart.atStartOfDay(zone).toInstant().toEpochMilli()
+            val rangeEnd = weekStart.plusDays(7).atStartOfDay(zone).toInstant().toEpochMilli()
+            repository.observeExpandedSchedules(rangeStart, rangeEnd).collect { schedules ->
                 PlannerWidgetSync.saveSnapshot(this@OnMyPlateApp, schedules)
             }
         }

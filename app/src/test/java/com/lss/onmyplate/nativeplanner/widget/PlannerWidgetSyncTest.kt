@@ -2,6 +2,7 @@ package com.lss.onmyplate.nativeplanner.widget
 
 import androidx.test.core.app.ApplicationProvider
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
+import com.lss.onmyplate.nativeplanner.data.repository.ScheduleOccurrence
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -34,8 +35,8 @@ class PlannerWidgetSyncTest {
         PlannerWidgetSync.saveSnapshot(
             context,
             listOf(
-                schedule(id = "later", title = "Later", startAt = secondStart, endAt = secondStart + 45 * 60 * 1_000L),
-                schedule(id = "earlier", title = "Earlier", startAt = firstStart, endAt = firstStart + 60 * 60 * 1_000L),
+                occurrence(schedule(id = "later", title = "Later", startAt = secondStart, endAt = secondStart + 45 * 60 * 1_000L)),
+                occurrence(schedule(id = "earlier", title = "Earlier", startAt = firstStart, endAt = firstStart + 60 * 60 * 1_000L)),
             ),
         )
 
@@ -70,7 +71,7 @@ class PlannerWidgetSyncTest {
 
         PlannerWidgetSync.saveSnapshot(
             context,
-            listOf(schedule(id = "open-ended", title = "Open Ended", startAt = startAt, endAt = null)),
+            listOf(occurrence(schedule(id = "open-ended", title = "Open Ended", startAt = startAt, endAt = null))),
         )
 
         val event = JSONObject(
@@ -99,6 +100,14 @@ class PlannerWidgetSyncTest {
             sourceApp = null,
             createdAt = 1L,
             updatedAt = 1L,
+        )
+
+    private fun occurrence(schedule: ScheduleEntity, isRecurring: Boolean = false): ScheduleOccurrence =
+        ScheduleOccurrence(
+            schedule = schedule,
+            scheduleId = schedule.id,
+            occurrenceStartAt = schedule.startAt,
+            isRecurring = isRecurring,
         )
 
     private fun epochMillis(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =

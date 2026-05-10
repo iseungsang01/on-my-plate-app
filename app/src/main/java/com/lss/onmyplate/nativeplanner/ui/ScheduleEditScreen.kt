@@ -11,24 +11,37 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.lss.onmyplate.nativeplanner.OnMyPlateApp
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
+import com.lss.onmyplate.nativeplanner.data.repository.RecurrenceInput
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
 import kotlinx.coroutines.launch
 
 @Composable
-fun ScheduleEditScreen(repository: PlannerRepository, scheduleId: String, onBack: () -> Unit) {
+fun ScheduleEditScreen(
+    repository: PlannerRepository,
+    scheduleId: String,
+    occurrenceStartAt: Long? = null,
+    onBack: () -> Unit,
+) {
     val schedule by repository.observeSchedule(scheduleId).collectAsState(initial = null)
     val scope = rememberCoroutineScope()
-    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as OnMyPlateApp
     var title by remember(schedule?.id) { mutableStateOf(schedule?.title.orEmpty()) }
     var startAt by remember(schedule?.id) { mutableStateOf(schedule?.startAt) }
     var endAt by remember(schedule?.id) { mutableStateOf(schedule?.endAt) }
     var location by remember(schedule?.id) { mutableStateOf(schedule?.location.orEmpty()) }
     var memo by remember(schedule?.id) { mutableStateOf(schedule?.memo.orEmpty()) }
     var status by remember(schedule?.id) { mutableStateOf(scheduleStatusFromDb(schedule?.status)) }
+    var repeatsWeekly by remember(schedule?.id) { mutableStateOf(false) }
+    var repeatUntilAt by remember(schedule?.id) { mutableStateOf<Long?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     val canSave = title.isNotBlank() && startAt != null
+
+    LaunchedEffect(schedule?.id) {
+        val loadedSchedule = schedule ?: return@LaunchedEffect
+        val rule = repository.getRecurrenceRule(loadedSchedule.id)
+        repeatsWeekly = rule != null
+        repeatUntilAt = rule?.untilAt
+    }
 
     if (schedule == null) {
         Box(Modifier.fillMaxSize().padding(16.dp)) { Text("일정을 찾을 수 없습니다.") }
@@ -63,6 +76,13 @@ fun ScheduleEditScreen(repository: PlannerRepository, scheduleId: String, onBack
                     minLines = 3,
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = FeedLoopColors.PrimaryDark, unfocusedBorderColor = FeedLoopColors.Border, focusedLabelColor = FeedLoopColors.PrimaryDark, cursorColor = FeedLoopColors.PrimaryDark),
                 )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("매주 반복", style = MaterialTheme.typography.bodyLarge)
+                    Switch(checked = repeatsWeekly, onCheckedChange = { repeatsWeekly = it })
+                }
+                if (repeatsWeekly) {
+                    DateTimePickerField(repeatUntilAt, { repeatUntilAt = it }, "반복 종료", required = false)
+                }
             }
         }
 
@@ -80,6 +100,21 @@ fun ScheduleEditScreen(repository: PlannerRepository, scheduleId: String, onBack
 
         message?.let { Text(it, color = FeedLoopColors.Error) }
 
+        if (occurrenceStartAt != null && repeatsWeekly) {
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        repository.skipRecurringOccurrence(scheduleId, occurrenceStartAt)
+                        onBack()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, FeedLoopColors.WarningBorder),
+            ) {
+                Text("이번 반복 건너뛰기")
+            }
+        }
+
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f), border = BorderStroke(1.dp, FeedLoopColors.Border)) { Text("취소") }
             Button(
@@ -93,6 +128,7 @@ fun ScheduleEditScreen(repository: PlannerRepository, scheduleId: String, onBack
                             location = location,
                             memo = memo,
                             status = status,
+                            recurrenceInput = if (repeatsWeekly) RecurrenceInput.Weekly(untilAt = repeatUntilAt) else RecurrenceInput.None,
                         )
                         if (ok) onBack() else message = "제목과 시작 시간을 확인해주세요."
                     }
