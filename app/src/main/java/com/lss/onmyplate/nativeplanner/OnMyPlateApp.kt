@@ -2,7 +2,9 @@ package com.lss.onmyplate.nativeplanner
 
 import android.app.Application
 import com.lss.onmyplate.nativeplanner.BuildConfig
+import com.lss.onmyplate.nativeplanner.data.auth.AuthRepository
 import com.lss.onmyplate.nativeplanner.data.db.AppDatabase
+import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.supabase.SharingRepository
 import com.lss.onmyplate.nativeplanner.domain.parser.GeminiAppointmentParser
@@ -27,8 +29,19 @@ class OnMyPlateApp : Application() {
         )
     }
     val repository by lazy { PlannerRepository(database, parser) }
+    val authRepository by lazy { AuthRepository(this) }
     val sharingRepository by lazy { SharingRepository(this) }
     val notifications by lazy { AppointmentNotificationManager(this) }
+
+    fun syncScheduleAsync(schedule: ScheduleEntity) {
+        appScope.launch {
+            runCatching {
+                if (sharingRepository.isConfigured() && sharingRepository.hasCachedSession()) {
+                    sharingRepository.uploadPersonalSchedule(schedule)
+                }
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()

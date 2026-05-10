@@ -75,8 +75,8 @@ The native Android widget is part of this MVP and renders only Room-backed sched
 - Play publishing also requires `PLAY_SERVICE_ACCOUNT_JSON_PATH`; `PLAY_TRACK` defaults to `internal` and `PLAY_RELEASE_STATUS` defaults to `DRAFT`.
 - Upload with `publishAab`; for user-visible updates, publish to a Play track with a non-draft release status.
 
-## Supabase schedule sharing
+## Supabase Edge Function planner API
 
-The Android app keeps local Room schedules private and shares only user-selected schedules through an external planner sharing API. Configure `PLANNER_API_BASE_URL` in `.env` (or CI env). The app reads the existing app login token from SharedPreferences (`PLANNER_SESSION_PREFS_NAME` / `PLANNER_SESSION_TOKEN_KEY`) and sends it as `Authorization: Bearer <token>` to the sharing API.
+The Android app uses a single Supabase Edge Function, `planner-api`, for app login, schedule sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` (or CI env) as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` verifies the app's own `planner_users` / `planner_sessions` rows and then writes to Supabase with server-only service-role credentials.
 
-The Android app no longer creates anonymous Supabase Auth users and no longer writes directly to Supabase PostgREST. A trusted backend must verify the existing app session, derive the app user ID, enforce sharing permissions, and use a server-only Supabase service-role key or private database connection. Shared-screen-only fake entries live in `planner_dummy_schedules` and are never copied into Room or the home widget. See `supabaseSQL.md` for the server-side schema and RLS posture.
+The Android app never stores service-role credentials and no longer depends on any PC-local backend. Shared-screen-only fake entries live in `planner_dummy_schedules` and are never copied into Room or the home widget. See `supabaseSQL.md` for the server-side schema and RLS posture.

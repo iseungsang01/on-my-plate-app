@@ -42,6 +42,9 @@ val releaseSigningEnvNames = listOf(
     "ANDROID_KEY_PASSWORD",
 )
 val playEnvNames = listOf("PLAY_SERVICE_ACCOUNT_JSON_PATH")
+val plannerApiBaseUrl = envOrDotenv("PLANNER_API_BASE_URL")
+    ?: envOrDotenv("SUPABASE_URL")?.trimEnd('/')?.let { "$it/functions/v1/planner-api" }
+    ?: ""
 
 android {
     namespace = "com.lss.onmyplate.nativeplanner"
@@ -63,7 +66,7 @@ android {
         buildConfigField(
             "String",
             "PLANNER_API_BASE_URL",
-            "\"${envOrDotenv("PLANNER_API_BASE_URL") ?: envOrDotenv("VITE_PLANNER_API_BASE_URL").orEmpty()}\"",
+            "\"$plannerApiBaseUrl\"",
         )
         buildConfigField(
             "String",

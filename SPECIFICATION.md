@@ -140,7 +140,7 @@ This document describes the current native Android implementation. It is intenti
 
 `data/supabase/SharingRepository.kt`
 
-- Client boundary for the external planner sharing API.
+- Client boundary for the Supabase Edge Function planner API.
 - Reads the existing app session token from SharedPreferences and sends it as a Bearer token.
 - Calls profile, group create/list, schedule upload, and schedule list endpoints under `/api/planner/share`.
 - Caches only the returned `public_id`; it does not store Supabase Auth tokens or call Supabase PostgREST directly.
@@ -252,11 +252,11 @@ This document describes the current native Android implementation. It is intenti
 ## Supabase sharing architecture
 
 - Local Room remains the source of truth for personal schedules, conflict checks, candidate parsing, and widget snapshots.
-- The sharing feature is opt-in from the planner screen. Android calls an external planner sharing API configured by `PLANNER_API_BASE_URL`.
+- The sharing feature is opt-in from the planner screen. Android calls the Supabase Edge Function `planner-api` configured by `PLANNER_API_BASE_URL`.
 - Android reads the existing app login token from SharedPreferences (`PLANNER_SESSION_PREFS_NAME`, default `planner_auth`; `PLANNER_SESSION_TOKEN_KEY`, default `session_token`) and sends it as `Authorization: Bearer <token>`.
 - Android does not create anonymous Supabase Auth sessions, store Supabase access/refresh tokens, or write directly to Supabase PostgREST tables.
-- A trusted backend verifies the existing session token, resolves the app user ID, checks group membership/ownership, and performs Supabase DB work with server-only credentials.
-- A user shares by giving their `public_id` to another user. Entering a partner `public_id` asks the sharing API to create or reuse a group and return accessible groups/schedules.
-- Only selected local schedules are uploaded to the sharing API; they remain independent copies of Room rows.
+- The `planner-api` Edge Function verifies the app session token against `planner_sessions`, resolves the app user ID, checks group membership/ownership, and performs Supabase DB work with server-only credentials.
+- A user shares by giving their `public_id` to another user. Entering a partner `public_id` asks `planner-api` to create or reuse a group and return accessible groups/schedules.
+- Only selected local schedules are uploaded to `planner-api`; they remain independent copies of Room rows.
 - Fake shared-screen-only entries are read from `planner_dummy_schedules` through the API and must not be inserted into Room, conflict detection, notifications, or widget snapshots.
-- Required mobile configuration: `PLANNER_API_BASE_URL`; `SUPABASE_SERVICE_ROLE_KEY` is server-only and must never be shipped in the app.
+- Required mobile configuration: `PLANNER_API_BASE_URL=https://<project-ref>.supabase.co/functions/v1/planner-api`; `SUPABASE_SERVICE_ROLE_KEY` is Edge-Function-only and must never be shipped in the app.

@@ -77,8 +77,8 @@ Unix 계열 셸에서는 다음을 사용합니다.
 - Play 게시에는 `PLAY_SERVICE_ACCOUNT_JSON_PATH`도 필요합니다. `PLAY_TRACK` 기본값은 `internal`, `PLAY_RELEASE_STATUS` 기본값은 `DRAFT`입니다.
 - 업로드는 `publishAab`로 수행합니다. 사용자가 볼 수 있는 업데이트로 배포하려면 Play 트랙에 초안이 아닌 릴리스 상태로 게시해야 합니다.
 
-## Supabase schedule sharing
+## Supabase Edge Function planner API
 
-The Android app keeps local Room schedules private and shares only user-selected schedules through an external planner sharing API. Configure `PLANNER_API_BASE_URL` in `.env` or CI. The app reads the existing app login token from SharedPreferences (`PLANNER_SESSION_PREFS_NAME` / `PLANNER_SESSION_TOKEN_KEY`) and sends it as `Authorization: Bearer <token>`.
+The Android app uses a single Supabase Edge Function, `planner-api`, for app login, schedule sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` or CI as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` verifies the app's own `planner_users` / `planner_sessions` rows and then writes to Supabase with server-only service-role credentials.
 
-Android no longer creates anonymous Supabase Auth users and no longer writes directly to Supabase PostgREST. A trusted backend verifies the existing session, resolves the app user ID, checks sharing permissions, and uses a server-only Supabase service-role key or private DB connection. Shared-screen-only dummy schedules are read from `planner_dummy_schedules` through the API and are never stored in Room or the widget. See `supabaseSQL.md` for the server-side schema and RLS posture.
+Android never stores service-role credentials and no longer depends on any PC-local backend. Shared-screen-only dummy schedules are read from `planner_dummy_schedules` through the API and are never stored in Room or the widget. See `supabaseSQL.md` for the server-side schema and RLS posture.

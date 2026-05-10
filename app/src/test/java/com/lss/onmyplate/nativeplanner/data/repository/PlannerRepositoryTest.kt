@@ -98,7 +98,7 @@ class PlannerRepositoryTest {
             titleOverride = null,
         )
 
-        assertEquals(SaveResult.Saved, result)
+        assertTrue(result is SaveResult.Saved)
         val schedules = db.scheduleDao().getAll()
         assertEquals(1, schedules.size)
         assertEquals("Team Sync", schedules.single().title)
@@ -115,7 +115,7 @@ class PlannerRepositoryTest {
         val first = repository.createCandidate("first", "com.example.chat", receivedAt = 1L)
         val startAt = 10_000L
         repository.updateCandidate(first.id, "First", startAt, startAt + 60_000L, null)
-        assertEquals(SaveResult.Saved, repository.saveFromCandidate(first.id, ScheduleStatus.Confirmed, null))
+        assertTrue(repository.saveFromCandidate(first.id, ScheduleStatus.Confirmed, null) is SaveResult.Saved)
 
         val second = repository.createCandidate("second", "com.example.chat", receivedAt = 2L)
         repository.updateCandidate(second.id, "Second", startAt + 30_000L, startAt + 90_000L, null)

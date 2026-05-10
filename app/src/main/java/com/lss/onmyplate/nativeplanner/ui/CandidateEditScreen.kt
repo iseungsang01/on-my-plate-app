@@ -1,4 +1,4 @@
-package com.lss.onmyplate.nativeplanner.ui
+﻿package com.lss.onmyplate.nativeplanner.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.lss.onmyplate.nativeplanner.OnMyPlateApp
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.repository.SaveResult
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
@@ -27,15 +28,16 @@ fun CandidateEditScreen(
 ) {
     val candidate by repository.observeCandidate(candidateId).collectAsState(initial = null)
     val scope = rememberCoroutineScope()
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as OnMyPlateApp
     var title by remember(candidate?.id) { mutableStateOf(candidate?.extractedTitle.orEmpty()) }
-    var startAt by remember(candidate?.id) { mutableStateOf(formatDateTime(candidate?.extractedStartAt)) }
-    var endAt by remember(candidate?.id) { mutableStateOf(formatDateTime(candidate?.extractedEndAt)) }
+    var startAt by remember(candidate?.id) { mutableStateOf(candidate?.extractedStartAt) }
+    var endAt by remember(candidate?.id) { mutableStateOf(candidate?.extractedEndAt) }
     var location by remember(candidate?.id) { mutableStateOf(candidate?.extractedLocation.orEmpty()) }
     var status by remember(candidate?.id) { mutableStateOf(ScheduleStatus.Confirmed) }
     val canSave = title.isNotBlank()
 
     if (candidate == null) {
-        Box(Modifier.fillMaxSize().padding(16.dp)) { Text("약속 후보를 찾을 수 없습니다") }
+        Box(Modifier.fillMaxSize().padding(16.dp)) { Text("약속 후보를 찾을 수 없습니다.") }
         return
     }
 
@@ -48,9 +50,14 @@ fun CandidateEditScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onBack) { Text("‹") }
+            TextButton(onClick = onBack) { Text("← 후보") }
             Text("약속 후보 상세", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            TextButton(onClick = {}) { Text("⋮") }
+            TextButton(onClick = {
+                scope.launch {
+                    repository.discardCandidate(candidateId)
+                    onBack()
+                }
+            }) { Text("버리기") }
         }
 
         AssistChip(
@@ -64,12 +71,12 @@ fun CandidateEditScreen(
 
         InfoBlock {
             BasketTextField(title, { title = it }, "제목")
-            BasketTextField(startAt, { startAt = it }, "시작 yyyy-MM-dd HH:mm")
-            BasketTextField(endAt, { endAt = it }, "종료 yyyy-MM-dd HH:mm")
+            DateTimePickerField(startAt, { startAt = it }, "시작 날짜/시간", required = false)
+            DateTimePickerField(endAt, { endAt = it }, "종료 날짜/시간", required = false)
             BasketTextField(location, { location = it }, "장소")
         }
 
-        Text("메모", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text("원문", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFF6F7FB)), border = BorderStroke(1.dp, FeedLoopColors.Border)) {
             Text(candidate!!.rawText, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(14.dp), color = FeedLoopColors.Secondary)
         }
@@ -81,13 +88,21 @@ fun CandidateEditScreen(
         StatusSelector(status = status, onStatus = { status = it })
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f), border = BorderStroke(1.dp, FeedLoopColors.Border)) { Text("수정 취소") }
+            OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f), border = BorderStroke(1.dp, FeedLoopColors.Border)) { Text("취소") }
             Button(
                 onClick = {
                     scope.launch {
-                        repository.updateCandidate(candidateId, title, parseDateTimeOrNull(startAt), parseDateTimeOrNull(endAt), location)
-                        when (repository.saveFromCandidate(candidateId, status, title)) {
+                        repository.updateCandidate(candidateId, title, startAt, endAt, location)
+                        when (val result = repository.saveFromCandidate(candidateId, status, title)) {
                             is SaveResult.Conflict -> onConflict()
+                            is SaveResult.Saved -> {
+                                app.syncScheduleAsync(result.schedule)
+                                onDone()
+                            }
+                            is SaveResult.SavedAsUncertain -> {
+                                app.syncScheduleAsync(result.schedule)
+                                onDone()
+                            }
                             else -> onDone()
                         }
                     }

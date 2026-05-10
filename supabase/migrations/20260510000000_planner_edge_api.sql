@@ -1,8 +1,5 @@
 create extension if not exists pgcrypto;
 
--- Supabase Auth is intentionally not used. The Supabase Edge Function
--- `planner-api` owns app login/session verification and uses service_role
--- credentials internally; Android never receives service_role credentials.
 create table if not exists public.planner_users (
   id text primary key,
   password_hash text not null,
@@ -113,7 +110,6 @@ alter table public.planner_schedules enable row level security;
 alter table public.planner_personal_schedules enable row level security;
 alter table public.planner_dummy_schedules enable row level security;
 
--- Remove policies from the previous anonymous Supabase Auth draft, if present.
 drop policy if exists "profiles are lookupable by authenticated users" on public.planner_profiles;
 drop policy if exists "users create their own profile" on public.planner_profiles;
 drop policy if exists "users update their own profile" on public.planner_profiles;
@@ -132,9 +128,6 @@ drop policy if exists "members insert dummy schedules" on public.planner_dummy_s
 drop policy if exists "creators update dummy schedules" on public.planner_dummy_schedules;
 drop policy if exists "creators delete dummy schedules" on public.planner_dummy_schedules;
 
--- No anon/authenticated policies are created. The Edge Function must enforce
--- login, membership, and ownership checks before using its server-only
--- service_role credentials.
 revoke all on public.planner_users from anon, authenticated;
 revoke all on public.planner_sessions from anon, authenticated;
 revoke all on public.planner_profiles from anon, authenticated;
@@ -152,55 +145,3 @@ grant all on public.planner_group_members to service_role;
 grant all on public.planner_schedules to service_role;
 grant all on public.planner_personal_schedules to service_role;
 grant all on public.planner_dummy_schedules to service_role;
-
--- Optional seed data for backend/API smoke tests.
-insert into public.planner_profiles (user_id, public_id, display_name)
-values
-  ('demo-user-a', 'omp-DEMO0001', 'Demo A'),
-  ('demo-user-b', 'omp-DEMO0002', 'Demo B')
-on conflict (user_id) do update
-set public_id = excluded.public_id,
-    display_name = excluded.display_name,
-    updated_at = now();
-
-insert into public.planner_groups (id, name, created_by)
-values ('10000000-0000-0000-0000-000000000001', 'Demo shared group', 'demo-user-a')
-on conflict (id) do update set name = excluded.name;
-
-insert into public.planner_group_members (group_id, user_id, role)
-values
-  ('10000000-0000-0000-0000-000000000001', 'demo-user-a', 'owner'),
-  ('10000000-0000-0000-0000-000000000001', 'demo-user-b', 'member')
-on conflict (group_id, user_id) do update set role = excluded.role;
-
-insert into public.planner_schedules (group_id, local_schedule_id, created_by, title, start_at, end_at, location, status, source_app)
-values (
-  '10000000-0000-0000-0000-000000000001',
-  'local-demo-1',
-  'demo-user-a',
-  '공유 회의 예시',
-  now() + interval '1 day',
-  now() + interval '1 day 1 hour',
-  '회의실',
-  'confirmed',
-  'seed'
-)
-on conflict (group_id, created_by, local_schedule_id) do update
-set title = excluded.title,
-    start_at = excluded.start_at,
-    end_at = excluded.end_at,
-    location = excluded.location,
-    status = excluded.status,
-    updated_at = now();
-
-insert into public.planner_dummy_schedules (group_id, created_by, title, start_at, end_at, location, status, memo)
-values (
-  '10000000-0000-0000-0000-000000000001',
-  'demo-user-b',
-  '더미 일정 예시',
-  now() + interval '2 days',
-  now() + interval '2 days 30 minutes',
-  '카페',
-  'planned',
-  '이 일정은 Room에 저장되지 않는 공유 화면 전용 더미 일정입니다'
-);

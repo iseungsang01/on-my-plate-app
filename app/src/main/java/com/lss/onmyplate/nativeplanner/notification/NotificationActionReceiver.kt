@@ -25,7 +25,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 var keepConflictNotification = false
                 when (intent.action) {
                     ACTION_SAVE -> keepConflictNotification = handleSave(app, intent, candidateId)
-                    ACTION_FORCE_ADD -> app.repository.saveFromCandidate(candidateId, ScheduleStatus.Confirmed, null, force = true)
+                    ACTION_FORCE_ADD -> syncSaved(app, app.repository.saveFromCandidate(candidateId, ScheduleStatus.Confirmed, null, force = true))
                     ACTION_CANCEL -> app.repository.discardCandidate(candidateId)
                 }
                 if (keepConflictNotification) {
@@ -56,7 +56,18 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 app.notifications.showConflict(result.candidate, result.conflicts.first())
                 true
             }
-            else -> false
+            else -> {
+                syncSaved(app, result)
+                false
+            }
+        }
+    }
+
+    private fun syncSaved(app: OnMyPlateApp, result: SaveResult) {
+        when (result) {
+            is SaveResult.Saved -> app.syncScheduleAsync(result.schedule)
+            is SaveResult.SavedAsUncertain -> app.syncScheduleAsync(result.schedule)
+            else -> Unit
         }
     }
 }

@@ -1,4 +1,4 @@
-package com.lss.onmyplate.nativeplanner.data.repository
+﻿package com.lss.onmyplate.nativeplanner.data.repository
 
 import androidx.room.withTransaction
 import com.lss.onmyplate.nativeplanner.data.db.AppDatabase
@@ -19,10 +19,12 @@ class PlannerRepository(
     private val candidates = db.appointmentCandidateDao()
 
     fun observeSchedules(): Flow<List<ScheduleEntity>> = schedules.observeAll()
+    fun observeSchedule(id: String): Flow<ScheduleEntity?> = schedules.observe(id)
     fun observePendingCandidates(): Flow<List<AppointmentCandidateEntity>> = candidates.observePending()
     fun observeCandidate(id: String): Flow<AppointmentCandidateEntity?> = candidates.observe(id)
     suspend fun getCandidate(id: String): AppointmentCandidateEntity? = candidates.get(id)
     suspend fun getSchedules(): List<ScheduleEntity> = schedules.getAll()
+    suspend fun getSchedule(id: String): ScheduleEntity? = schedules.get(id)
 
     suspend fun createCandidate(rawText: String, sourceApp: String?, receivedAt: Long): AppointmentCandidateEntity {
         val parsed = parser.parse(rawText, receivedAt)
@@ -75,9 +77,9 @@ class PlannerRepository(
         }
 
         if (selectedStatus == ScheduleStatus.Uncertain || titledCandidate.extractedStartAt == null) {
-            insertSchedule(titledCandidate, selectedStatus, title, forceStartAt = titledCandidate.createdAt)
+            val schedule = insertSchedule(titledCandidate, selectedStatus, title, forceStartAt = titledCandidate.createdAt)
             candidates.update(titledCandidate.copy(status = CandidateStatus.Confirmed.dbValue))
-            return@withTransaction SaveResult.SavedAsUncertain
+            return@withTransaction SaveResult.SavedAsUncertain(schedule)
         }
 
         val startAt = titledCandidate.extractedStartAt
@@ -87,9 +89,9 @@ class PlannerRepository(
             return@withTransaction SaveResult.Conflict(titledCandidate, conflicts)
         }
 
-        insertSchedule(titledCandidate, selectedStatus, title)
+        val schedule = insertSchedule(titledCandidate, selectedStatus, title)
         candidates.update(titledCandidate.copy(status = CandidateStatus.Confirmed.dbValue))
-        SaveResult.Saved
+        SaveResult.Saved(schedule)
     }
 
     suspend fun updateCandidate(
@@ -110,6 +112,31 @@ class PlannerRepository(
         )
     }
 
+    suspend fun updateSchedule(
+        scheduleId: String,
+        title: String,
+        startAt: Long?,
+        endAt: Long?,
+        location: String?,
+        memo: String?,
+        status: ScheduleStatus,
+    ): Boolean {
+        val schedule = schedules.get(scheduleId) ?: return false
+        val cleanTitle = title.trim().takeIf { it.isNotBlank() } ?: return false
+        schedules.update(
+            schedule.copy(
+                title = cleanTitle,
+                startAt = startAt ?: schedule.startAt,
+                endAt = endAt,
+                location = location?.ifBlank { null },
+                memo = memo?.ifBlank { null },
+                status = status.dbValue,
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
+        return true
+    }
+
     suspend fun discardCandidate(candidateId: String) {
         val candidate = candidates.get(candidateId) ?: return
         if (candidate.status == CandidateStatus.Pending.dbValue) {
@@ -122,7 +149,7 @@ class PlannerRepository(
         selectedStatus: ScheduleStatus,
         titleOverride: String?,
         forceStartAt: Long? = null,
-    ) {
+    ): ScheduleEntity {
         val now = System.currentTimeMillis()
         val startAt = forceStartAt ?: candidate.extractedStartAt ?: now
         val scheduleStatus = if (selectedStatus == ScheduleStatus.Uncertain || candidate.extractedStartAt == null) {
@@ -130,8 +157,7 @@ class PlannerRepository(
         } else {
             selectedStatus
         }
-        schedules.insert(
-            ScheduleEntity(
+        val schedule = ScheduleEntity(
                 id = UUID.randomUUID().toString(),
                 title = titleOverride?.takeIf { it.isNotBlank() } ?: candidate.extractedTitle,
                 startAt = startAt,
@@ -143,8 +169,9 @@ class PlannerRepository(
                 sourceApp = candidate.sourceApp,
                 createdAt = now,
                 updatedAt = now,
-            ),
-        )
+            )
+        schedules.insert(schedule)
+        return schedule
     }
 }
 
@@ -156,8 +183,8 @@ sealed interface SaveAttempt {
 }
 
 sealed interface SaveResult {
-    data object Saved : SaveResult
-    data object SavedAsUncertain : SaveResult
+    data class Saved(val schedule: ScheduleEntity) : SaveResult
+    data class SavedAsUncertain(val schedule: ScheduleEntity) : SaveResult
     data object AlreadyHandled : SaveResult
     data object MissingCandidate : SaveResult
     data object TitleRequired : SaveResult

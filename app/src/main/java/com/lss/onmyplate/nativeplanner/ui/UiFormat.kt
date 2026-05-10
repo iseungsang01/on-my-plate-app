@@ -3,6 +3,8 @@ package com.lss.onmyplate.nativeplanner.ui
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
 private val zoneId = ZoneId.of("Asia/Seoul")
@@ -18,3 +20,11 @@ fun formatTime(millis: Long): String = timeFormatter.format(Instant.ofEpochMilli
 
 fun parseDateTimeOrNull(value: String): Long? =
     runCatching { LocalDateTime.parse(value.trim(), dateTimeFormatter).atZone(zoneId).toInstant().toEpochMilli() }.getOrNull()
+
+
+fun millisToLocalDateTime(millis: Long?): LocalDateTime? =
+    millis?.let { Instant.ofEpochMilli(it).atZone(zoneId).toLocalDateTime() }
+
+fun localDateTimeToMillis(value: LocalDateTime): Long = value.atZone(zoneId).toInstant().toEpochMilli()
+
+fun combineDateAndTime(date: LocalDate, time: LocalTime): Long = localDateTimeToMillis(LocalDateTime.of(date, time))

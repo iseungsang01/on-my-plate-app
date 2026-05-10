@@ -35,12 +35,21 @@ fun SharingScreen(
     var includeDummy by remember { mutableStateOf(true) }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    val canUseSharing = sharingRepository.isConfigured() && sharingRepository.hasCachedSession()
 
     fun refresh() {
         scope.launch {
             loading = true
             message = null
             try {
+                if (!sharingRepository.hasCachedSession()) {
+                    localSchedules = plannerRepository.getSchedules()
+                    groups = emptyList()
+                    selectedGroup = null
+                    sharedSchedules = emptyList()
+                    message = "게스트 모드에서는 공유 기능을 사용할 수 없습니다."
+                    return@launch
+                }
                 if (!sharingRepository.isConfigured()) {
                     message = "공유 API 설정이 없습니다. .env에 PLANNER_API_BASE_URL을 넣어주세요."
                     localSchedules = plannerRepository.getSchedules()
@@ -61,11 +70,11 @@ fun SharingScreen(
 
     LaunchedEffect(Unit) { refresh() }
     LaunchedEffect(selectedGroup?.id, includeDummy) {
-        selectedGroup?.let { group ->
-            runCatching { sharingRepository.listSharedSchedules(group.id, includeDummy) }
-                .onSuccess { sharedSchedules = it }
-                .onFailure { message = it.message }
-        }
+        val group = selectedGroup ?: return@LaunchedEffect
+        if (!canUseSharing) return@LaunchedEffect
+        runCatching { sharingRepository.listSharedSchedules(group.id, includeDummy) }
+            .onSuccess { sharedSchedules = it }
+            .onFailure { message = it.message }
     }
 
     Box(
@@ -115,7 +124,7 @@ fun SharingScreen(
                                     }
                                 }
                             },
-                            enabled = partnerId.isNotBlank() && !loading && sharingRepository.isConfigured(),
+                            enabled = partnerId.isNotBlank() && !loading && canUseSharing,
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text("상대 ID로 공유 시작") }
                     }
@@ -149,7 +158,7 @@ fun SharingScreen(
             item { Text("내 로컬 일정 공유하기", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
             if (localSchedules.isEmpty()) item { Text("공유할 로컬 일정이 없습니다.", color = FeedLoopColors.Secondary) }
             items(localSchedules, key = { it.id }) { schedule ->
-                LocalShareRow(schedule = schedule, enabled = selectedGroup != null && !loading && sharingRepository.isConfigured()) {
+                LocalShareRow(schedule = schedule, enabled = selectedGroup != null && !loading && canUseSharing) {
                     scope.launch {
                         val group = selectedGroup ?: return@launch
                         loading = true

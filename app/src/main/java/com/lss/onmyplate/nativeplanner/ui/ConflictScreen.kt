@@ -1,4 +1,4 @@
-package com.lss.onmyplate.nativeplanner.ui
+﻿package com.lss.onmyplate.nativeplanner.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -13,9 +13,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.lss.onmyplate.nativeplanner.OnMyPlateApp
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.repository.SaveAttempt
+import com.lss.onmyplate.nativeplanner.data.repository.SaveResult
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
 import kotlinx.coroutines.launch
 
@@ -27,6 +29,7 @@ fun ConflictScreen(
     onDone: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as OnMyPlateApp
     var conflicts by remember { mutableStateOf<List<ScheduleEntity>>(emptyList()) }
     val candidate by repository.observeCandidate(candidateId).collectAsState(initial = null)
     val hasTitle = candidate?.extractedTitle?.isNotBlank() == true
@@ -48,9 +51,9 @@ fun ConflictScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onEdit) { Text("‹") }
+            TextButton(onClick = onEdit) { Text("← 편집") }
             Text("일정 충돌", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            TextButton(onClick = {}) { Text("⋮") }
+            Spacer(Modifier.width(64.dp))
         }
 
         AssistChip(
@@ -71,10 +74,10 @@ fun ConflictScreen(
         }
 
         SectionTitle("옵션")
-        ConflictOption("time", "시간 변경 후 추가", selectedOption) { selectedOption = it }
+        ConflictOption("time", "시간을 바꿔서 추가", selectedOption) { selectedOption = it }
         ConflictOption("adjust", "겹치는 일정 조정", selectedOption) { selectedOption = it }
-        ConflictOption("hold", "보류하기", selectedOption) { selectedOption = it }
-        ConflictOption("force", "추가하지 않음", selectedOption) { selectedOption = it }
+        ConflictOption("hold", "보류 일정으로 추가", selectedOption) { selectedOption = it }
+        ConflictOption("discard", "추가하지 않음", selectedOption) { selectedOption = it }
 
         Spacer(Modifier.weight(1f, fill = false))
         Button(
@@ -82,7 +85,11 @@ fun ConflictScreen(
                 when (selectedOption) {
                     "time", "adjust" -> onEdit()
                     "hold" -> scope.launch {
-                        repository.saveFromCandidate(candidateId, ScheduleStatus.Uncertain, candidate?.extractedTitle)
+                        when (val result = repository.saveFromCandidate(candidateId, ScheduleStatus.Uncertain, candidate?.extractedTitle)) {
+                            is SaveResult.Saved -> app.syncScheduleAsync(result.schedule)
+                            is SaveResult.SavedAsUncertain -> app.syncScheduleAsync(result.schedule)
+                            else -> Unit
+                        }
                         onDone()
                     }
                     else -> scope.launch {
@@ -99,7 +106,11 @@ fun ConflictScreen(
         OutlinedButton(
             onClick = {
                 scope.launch {
-                    repository.saveFromCandidate(candidateId, ScheduleStatus.Confirmed, candidate?.extractedTitle, force = true)
+                    when (val result = repository.saveFromCandidate(candidateId, ScheduleStatus.Confirmed, candidate?.extractedTitle, force = true)) {
+                        is SaveResult.Saved -> app.syncScheduleAsync(result.schedule)
+                        is SaveResult.SavedAsUncertain -> app.syncScheduleAsync(result.schedule)
+                        else -> Unit
+                    }
                     onDone()
                 }
             },

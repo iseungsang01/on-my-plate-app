@@ -1,4 +1,4 @@
-package com.lss.onmyplate.nativeplanner.ui
+﻿package com.lss.onmyplate.nativeplanner.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -17,14 +17,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lss.onmyplate.nativeplanner.data.entity.AppointmentCandidateEntity
-import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
-import com.lss.onmyplate.nativeplanner.data.repository.SaveAttempt
 import kotlinx.coroutines.launch
 
 @Composable
-fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Unit, onOpenSharing: () -> Unit) {
-    val schedules by repository.observeSchedules().collectAsState(initial = emptyList())
+fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Unit) {
     val pending by repository.observePendingCandidates().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     var directInput by remember { mutableStateOf("") }
@@ -33,7 +30,6 @@ fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Un
     val filteredPending = remember(pending, selectedFilter) {
         when (selectedFilter) {
             "확정 가능" -> pending.filter { it.extractedTitle.isNotBlank() && it.extractedStartAt != null }
-            "충돌 있음" -> emptyList()
             "정보 부족" -> pending.filter { it.extractedTitle.isBlank() || it.extractedStartAt == null }
             else -> pending
         }
@@ -42,7 +38,7 @@ fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Un
     Box(
         Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color(0xFFF8FAFF), Color(0xFFEDEBFF))))
+            .background(Brush.verticalGradient(listOf(Color(0xFFFFFBF4), Color(0xFFFFEFD7))))
     ) {
         Column(
             Modifier
@@ -50,29 +46,25 @@ fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Un
                 .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("약속 바구니", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                    Text("대화에서 찾은 약속 후보 ${pending.size}개", style = MaterialTheme.typography.bodySmall, color = FeedLoopColors.Secondary)
-                }
-                OutlinedButton(onClick = onOpenSharing) { Text("공유") }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("약속 후보 바구니", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("메시지에서 찾은 약속 후보를 추가하고 확정해요. 현재 ${pending.size}개", style = MaterialTheme.typography.bodySmall, color = FeedLoopColors.Secondary)
             }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatPill("${pending.size}", "전체", FeedLoopColors.PrimaryDark, Modifier.weight(1f))
-                StatPill("${pending.count { it.extractedStartAt != null }}", "확정 가능", FeedLoopColors.Success, Modifier.weight(1f))
-                StatPill("0", "충돌 있음", FeedLoopColors.Error, Modifier.weight(1f))
-                StatPill("${pending.count { it.extractedStartAt == null }}", "정보 부족", FeedLoopColors.Secondary, Modifier.weight(1f))
+                StatPill("${pending.count { it.extractedStartAt != null }}", "시간 있음", FeedLoopColors.Success, Modifier.weight(1f))
+                StatPill("${pending.count { it.extractedStartAt == null }}", "정보 부족", FeedLoopColors.Warning, Modifier.weight(1f))
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("전체", "확정 가능", "충돌 있음", "정보 부족").forEach { filter ->
+                listOf("전체", "확정 가능", "정보 부족").forEach { filter ->
                     FilterChip(
                         selected = selectedFilter == filter,
                         onClick = { selectedFilter = filter },
                         label = { Text(filter) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFFEDEBFF),
+                            selectedContainerColor = FeedLoopColors.PrimaryLight,
                             selectedLabelColor = FeedLoopColors.PrimaryDark,
                             containerColor = FeedLoopColors.Surface,
                         ),
@@ -92,7 +84,7 @@ fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Un
                         value = directInput,
                         onValueChange = { directInput = it },
                         label = { Text("약속 메시지 붙여넣기 또는 입력") },
-                        placeholder = { Text("예: 다음 주 금요일 저녁 강남에서 민수랑 저녁") },
+                        placeholder = { Text("예: 다음 주 금요일 저녁 7시 강남에서 민수랑 저녁") },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2,
                         enabled = !isCreatingCandidate,
@@ -121,7 +113,7 @@ fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Un
                         modifier = Modifier.fillMaxWidth(),
                         enabled = directInput.isNotBlank() && !isCreatingCandidate,
                         colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
-                    ) { Text(if (isCreatingCandidate) "분석 중..." else "선택한 약속 일정에 추가") }
+                    ) { Text(if (isCreatingCandidate) "분석 중..." else "후보 만들기") }
                 }
             }
 
@@ -131,11 +123,6 @@ fun PlannerScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Un
                 }
                 items(filteredPending, key = { it.id }) { candidate ->
                     CandidateBasketCard(candidate = candidate, onClick = { onOpenCandidate(candidate.id) })
-                }
-
-                if (schedules.isNotEmpty()) {
-                    item { Text("최근 추가된 일정", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp)) }
-                    items(schedules.take(3), key = { "schedule-${it.id}" }) { ScheduleRow(it) }
                 }
             }
         }
@@ -156,7 +143,7 @@ private fun StatPill(count: String, label: String, color: Color, modifier: Modif
 fun CandidateBasketCard(candidate: AppointmentCandidateEntity, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val ready = candidate.extractedTitle.isNotBlank() && candidate.extractedStartAt != null
     val accent = if (ready) FeedLoopColors.Success else FeedLoopColors.Warning
-    val statusText = if (ready) "등록 가능" else "수정 필요"
+    val statusText = if (ready) "확정 가능" else "수정 필요"
     Card(
         modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface),
@@ -174,24 +161,9 @@ fun CandidateBasketCard(candidate: AppointmentCandidateEntity, onClick: () -> Un
                 Text(candidate.extractedLocation ?: "장소 정보 없음", color = FeedLoopColors.Secondary, style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text("수정", color = FeedLoopColors.PrimaryDark, style = MaterialTheme.typography.labelMedium)
-                    Text("추가", color = FeedLoopColors.Secondary, style = MaterialTheme.typography.labelMedium)
-                    Text("삭제", color = FeedLoopColors.Error, style = MaterialTheme.typography.labelMedium)
+                    Text("일정 추가", color = FeedLoopColors.Secondary, style = MaterialTheme.typography.labelMedium)
+                    Text("버리기", color = FeedLoopColors.Error, style = MaterialTheme.typography.labelMedium)
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScheduleRow(schedule: ScheduleEntity) {
-    Card(Modifier.fillMaxWidth(), colors = FeedLoopCardColors(), border = BorderStroke(1.dp, FeedLoopColors.Border)) {
-        Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(58.dp).clip(MaterialTheme.shapes.medium).background(FeedLoopColors.PendingBg).padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                Text(formatTime(schedule.startAt), color = FeedLoopColors.Pending, fontWeight = FontWeight.Bold)
-            }
-            Column(Modifier.weight(1f)) {
-                Text(schedule.title, style = MaterialTheme.typography.titleMedium, color = FeedLoopColors.TextPrimary)
-                Text(listOfNotNull(schedule.location, schedule.status).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = FeedLoopColors.Secondary)
             }
         }
     }
@@ -202,7 +174,7 @@ private fun EmptyBasketCard(filter: String) {
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface), border = BorderStroke(1.dp, FeedLoopColors.Border)) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("${filter} 약속 후보가 없어요", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("메시지를 입력하거나 공유하면 약속 바구니에 후보가 쌓입니다.", color = FeedLoopColors.Secondary)
+            Text("메시지를 입력하거나 Android 공유 기능으로 보내면 바구니에 후보가 담깁니다.", color = FeedLoopColors.Secondary)
         }
     }
 }

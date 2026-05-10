@@ -1,4 +1,4 @@
-package com.lss.onmyplate.nativeplanner.data.dao
+﻿package com.lss.onmyplate.nativeplanner.data.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
@@ -12,6 +12,12 @@ import kotlinx.coroutines.flow.Flow
 interface ScheduleDao {
     @Query("SELECT * FROM schedules ORDER BY startAt ASC")
     fun observeAll(): Flow<List<ScheduleEntity>>
+
+    @Query("SELECT * FROM schedules WHERE id = :id")
+    fun observe(id: String): Flow<ScheduleEntity?>
+
+    @Query("SELECT * FROM schedules WHERE id = :id")
+    suspend fun get(id: String): ScheduleEntity?
 
     @Query("SELECT * FROM schedules ORDER BY startAt ASC")
     suspend fun getAll(): List<ScheduleEntity>

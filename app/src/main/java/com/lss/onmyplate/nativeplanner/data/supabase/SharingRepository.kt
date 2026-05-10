@@ -1,4 +1,4 @@
-package com.lss.onmyplate.nativeplanner.data.supabase
+﻿package com.lss.onmyplate.nativeplanner.data.supabase
 
 import android.content.Context
 import com.lss.onmyplate.nativeplanner.BuildConfig
@@ -22,6 +22,12 @@ class SharingRepository(context: Context) {
 
     fun isConfigured(): Boolean = client.isConfigured()
     fun cachedPublicId(): String? = prefs.getString(KEY_PUBLIC_ID, null)
+    fun hasCachedSession(): Boolean = sessionPrefs.getString(BuildConfig.PLANNER_SESSION_TOKEN_KEY, null)?.isNotBlank() == true
+
+    fun clearAccountCache() {
+        sessionPrefs.edit().remove(BuildConfig.PLANNER_SESSION_TOKEN_KEY).apply()
+        prefs.edit().remove(KEY_PUBLIC_ID).apply()
+    }
 
     suspend fun ensureProfile(): ShareProfile = withContext(Dispatchers.IO) {
         val profile = client.profile(sessionToken())
@@ -40,6 +46,10 @@ class SharingRepository(context: Context) {
 
     suspend fun uploadSchedule(groupId: String, schedule: ScheduleEntity): Unit = withContext(Dispatchers.IO) {
         client.uploadSchedule(sessionToken(), groupId, schedule)
+    }
+
+    suspend fun uploadPersonalSchedule(schedule: ScheduleEntity): Unit = withContext(Dispatchers.IO) {
+        client.uploadPersonalSchedule(sessionToken(), schedule)
     }
 
     suspend fun listSharedSchedules(groupId: String, includeDummy: Boolean): List<SharedSchedule> = withContext(Dispatchers.IO) {
@@ -93,17 +103,11 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
     }
 
     fun uploadSchedule(token: String, groupId: String, schedule: ScheduleEntity) {
-        val body = JSONObject()
-            .put("localScheduleId", schedule.id)
-            .put("title", schedule.title)
-            .put("startAt", Instant.ofEpochMilli(schedule.startAt).toString())
-            .put("endAt", schedule.endAt?.let { Instant.ofEpochMilli(it).toString() } ?: JSONObject.NULL)
-            .put("location", schedule.location ?: JSONObject.NULL)
-            .put("memo", schedule.memo ?: JSONObject.NULL)
-            .put("status", schedule.status)
-            .put("sourceText", schedule.sourceText ?: JSONObject.NULL)
-            .put("sourceApp", schedule.sourceApp ?: JSONObject.NULL)
-        request("POST", "/api/planner/share/groups/${url(groupId)}/schedules", token, body)
+        request("POST", "/api/planner/share/groups/${url(groupId)}/schedules", token, schedule.toApiJson())
+    }
+
+    fun uploadPersonalSchedule(token: String, schedule: ScheduleEntity) {
+        request("POST", "/api/planner/schedules", token, schedule.toApiJson())
     }
 
     fun listSchedules(token: String, groupId: String, includeDummy: Boolean): List<SharedSchedule> {
@@ -117,6 +121,17 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
             .map { it.toSharedSchedule() }
             .sortedBy { it.startAt }
     }
+
+    private fun ScheduleEntity.toApiJson(): JSONObject = JSONObject()
+        .put("localScheduleId", id)
+        .put("title", title)
+        .put("startAt", Instant.ofEpochMilli(startAt).toString())
+        .put("endAt", endAt?.let { Instant.ofEpochMilli(it).toString() } ?: JSONObject.NULL)
+        .put("location", location ?: JSONObject.NULL)
+        .put("memo", memo ?: JSONObject.NULL)
+        .put("status", status)
+        .put("sourceText", sourceText ?: JSONObject.NULL)
+        .put("sourceApp", sourceApp ?: JSONObject.NULL)
 
     private fun request(method: String, path: String, token: String, body: JSONObject?): String {
         require(isConfigured()) { "Planner share API is not configured." }
@@ -196,3 +211,4 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
     private fun parseInstantMillis(value: String): Long = Instant.parse(value).toEpochMilli()
     private fun url(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
+
