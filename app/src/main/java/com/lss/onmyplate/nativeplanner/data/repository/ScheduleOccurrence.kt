@@ -11,7 +11,20 @@ data class ScheduleOccurrence(
 
 sealed interface RecurrenceInput {
     data object None : RecurrenceInput
+    data class Daily(
+        val intervalDays: Int = 1,
+        val untilAt: Long? = null,
+        val count: Int? = null,
+    ) : RecurrenceInput
+
     data class Weekly(
+        val intervalWeeks: Int = 1,
+        val untilAt: Long? = null,
+        val count: Int? = null,
+    ) : RecurrenceInput
+
+    data class Monthly(
+        val intervalMonths: Int = 1,
         val untilAt: Long? = null,
         val count: Int? = null,
     ) : RecurrenceInput

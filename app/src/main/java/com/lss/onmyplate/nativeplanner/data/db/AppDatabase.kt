@@ -21,7 +21,7 @@ import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceRuleEntity
         ScheduleRecurrenceRuleEntity::class,
         ScheduleRecurrenceExceptionEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -73,9 +73,44 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `schedule_recurrence_rules_new` (
+                        `scheduleId` TEXT NOT NULL,
+                        `frequency` TEXT NOT NULL,
+                        `interval` INTEGER NOT NULL,
+                        `dayOfWeek` INTEGER,
+                        `dayOfMonth` INTEGER,
+                        `untilAt` INTEGER,
+                        `count` INTEGER,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`scheduleId`),
+                        FOREIGN KEY(`scheduleId`) REFERENCES `schedules`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `schedule_recurrence_rules_new` (
+                        `scheduleId`, `frequency`, `interval`, `dayOfWeek`, `dayOfMonth`, `untilAt`, `count`, `createdAt`, `updatedAt`
+                    )
+                    SELECT
+                        `scheduleId`, `frequency`, `intervalWeeks`, `dayOfWeek`, NULL, `untilAt`, `count`, `createdAt`, `updatedAt`
+                    FROM `schedule_recurrence_rules`
+                    """.trimIndent(),
+                )
+                db.execSQL("DROP TABLE `schedule_recurrence_rules`")
+                db.execSQL("ALTER TABLE `schedule_recurrence_rules_new` RENAME TO `schedule_recurrence_rules`")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_schedule_recurrence_rules_scheduleId` ON `schedule_recurrence_rules` (`scheduleId`)")
+            }
+        }
+
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "on_my_plate_native.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
 
         private fun SupportSQLiteDatabase.hasColumn(tableName: String, columnName: String): Boolean {

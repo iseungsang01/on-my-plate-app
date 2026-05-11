@@ -14,9 +14,10 @@ type FeedbackPayload = {
   appVersionCode: number;
 };
 type RecurrenceRuleInput = {
-  frequency: "weekly";
-  intervalWeeks: number;
-  dayOfWeek: number;
+  frequency: "daily" | "weekly" | "monthly";
+  interval: number;
+  dayOfWeek: number | null;
+  dayOfMonth: number | null;
   untilAt: string | null;
   count: number | null;
 };
@@ -533,14 +534,23 @@ function readRecurrenceRule(value: unknown): RecurrenceRuleInput | null {
   if (value == null) return null;
   if (!isPlainObject(value)) throw apiError(400, "recurrence must be an object or null.");
   const frequency = optionalString(value.frequency) ?? "weekly";
-  if (frequency !== "weekly") throw apiError(400, "Only weekly recurrence is supported.");
-  const intervalWeeks = optionalPositiveInteger(value.intervalWeeks, 1);
-  const dayOfWeek = optionalPositiveInteger(value.dayOfWeek, 0);
-  if (dayOfWeek < 1 || dayOfWeek > 7) throw apiError(400, "recurrence.dayOfWeek must be 1-7.");
+  if (frequency !== "daily" && frequency !== "weekly" && frequency !== "monthly") {
+    throw apiError(400, "recurrence.frequency must be daily, weekly, or monthly.");
+  }
+  const interval = optionalPositiveInteger(value.interval == null ? value.intervalWeeks : value.interval, 1);
+  const dayOfWeek = optionalPositiveIntegerOrNull(value.dayOfWeek);
+  const dayOfMonth = optionalPositiveIntegerOrNull(value.dayOfMonth);
+  if (frequency === "weekly" && (dayOfWeek == null || dayOfWeek < 1 || dayOfWeek > 7)) {
+    throw apiError(400, "recurrence.dayOfWeek must be 1-7 for weekly recurrence.");
+  }
+  if (frequency === "monthly" && (dayOfMonth == null || dayOfMonth < 1 || dayOfMonth > 31)) {
+    throw apiError(400, "recurrence.dayOfMonth must be 1-31 for monthly recurrence.");
+  }
   return {
     frequency,
-    intervalWeeks,
-    dayOfWeek,
+    interval,
+    dayOfWeek: frequency === "weekly" ? dayOfWeek : null,
+    dayOfMonth: frequency === "monthly" ? dayOfMonth : null,
     untilAt: optionalString(value.untilAt),
     count: optionalPositiveIntegerOrNull(value.count),
   };
@@ -582,8 +592,10 @@ async function saveScheduleRecurrence(
       {
         schedule_id: scheduleId,
         frequency: recurrence.frequency,
-        interval_weeks: recurrence.intervalWeeks,
+        interval: recurrence.interval,
+        interval_weeks: recurrence.frequency === "weekly" ? recurrence.interval : null,
         day_of_week: recurrence.dayOfWeek,
+        day_of_month: recurrence.dayOfMonth,
         until_at: recurrence.untilAt,
         count: recurrence.count,
         updated_at: now,
@@ -616,7 +628,7 @@ async function attachRecurrenceToSchedules(
 
   const { data: rules, error: rulesError } = await db
     .from(ruleTable)
-    .select("schedule_id,frequency,interval_weeks,day_of_week,until_at,count")
+    .select("schedule_id,frequency,interval,interval_weeks,day_of_week,day_of_month,until_at,count")
     .in("schedule_id", ids);
   if (rulesError) throw apiError(500, rulesError.message);
 
@@ -722,8 +734,10 @@ function recurrenceRuleToJson(rule: Record<string, unknown> | undefined): JsonOb
   if (!rule) return null;
   return {
     frequency: optionalString(rule.frequency) ?? "weekly",
-    intervalWeeks: Number(rule.interval_weeks),
-    dayOfWeek: Number(rule.day_of_week),
+    interval: Number(rule.interval ?? rule.interval_weeks ?? 1),
+    intervalWeeks: rule.frequency === "weekly" ? Number(rule.interval ?? rule.interval_weeks ?? 1) : null,
+    dayOfWeek: rule.day_of_week == null ? null : Number(rule.day_of_week),
+    dayOfMonth: rule.day_of_month == null ? null : Number(rule.day_of_month),
     untilAt: optionalString(rule.until_at),
     count: typeof rule.count === "number" ? rule.count : null,
   };

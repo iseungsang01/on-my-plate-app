@@ -12,7 +12,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
-import com.lss.onmyplate.nativeplanner.data.repository.RecurrenceInput
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
 import kotlinx.coroutines.launch
 
@@ -31,16 +30,15 @@ fun ScheduleEditScreen(
     var location by remember(schedule?.id) { mutableStateOf(schedule?.location.orEmpty()) }
     var memo by remember(schedule?.id) { mutableStateOf(schedule?.memo.orEmpty()) }
     var status by remember(schedule?.id) { mutableStateOf(scheduleStatusFromDb(schedule?.status)) }
-    var repeatsWeekly by remember(schedule?.id) { mutableStateOf(false) }
-    var repeatUntilAt by remember(schedule?.id) { mutableStateOf<Long?>(null) }
+    var recurrenceState by remember(schedule?.id) { mutableStateOf(RecurrenceUiState()) }
     var message by remember { mutableStateOf<String?>(null) }
-    val canSave = title.isNotBlank() && startAt != null
+    val recurrenceInput = recurrenceState.toRecurrenceInput()
+    val canSave = title.isNotBlank() && startAt != null && recurrenceInput != null
 
     LaunchedEffect(schedule?.id) {
         val loadedSchedule = schedule ?: return@LaunchedEffect
         val rule = repository.getRecurrenceRule(loadedSchedule.id)
-        repeatsWeekly = rule != null
-        repeatUntilAt = rule?.untilAt
+        recurrenceState = rule?.toRecurrenceUiState() ?: RecurrenceUiState()
     }
 
     if (schedule == null) {
@@ -76,13 +74,7 @@ fun ScheduleEditScreen(
                     minLines = 3,
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = FeedLoopColors.PrimaryDark, unfocusedBorderColor = FeedLoopColors.Border, focusedLabelColor = FeedLoopColors.PrimaryDark, cursorColor = FeedLoopColors.PrimaryDark),
                 )
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("매주 반복", style = MaterialTheme.typography.bodyLarge)
-                    Switch(checked = repeatsWeekly, onCheckedChange = { repeatsWeekly = it })
-                }
-                if (repeatsWeekly) {
-                    DateTimePickerField(repeatUntilAt, { repeatUntilAt = it }, "반복 종료", required = false)
-                }
+                RecurrenceControls(recurrenceState, { recurrenceState = it })
             }
         }
 
@@ -100,7 +92,7 @@ fun ScheduleEditScreen(
 
         message?.let { Text(it, color = FeedLoopColors.Error) }
 
-        if (occurrenceStartAt != null && repeatsWeekly) {
+        if (occurrenceStartAt != null && recurrenceState.mode != RecurrenceMode.None) {
             OutlinedButton(
                 onClick = {
                     scope.launch {
@@ -128,7 +120,7 @@ fun ScheduleEditScreen(
                             location = location,
                             memo = memo,
                             status = status,
-                            recurrenceInput = if (repeatsWeekly) RecurrenceInput.Weekly(untilAt = repeatUntilAt) else RecurrenceInput.None,
+                            recurrenceInput = recurrenceInput ?: return@launch,
                         )
                         if (ok) onBack() else message = "제목과 시작 시간을 확인해주세요."
                     }

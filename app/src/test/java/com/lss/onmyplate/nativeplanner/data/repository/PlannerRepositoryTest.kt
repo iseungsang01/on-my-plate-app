@@ -158,6 +158,91 @@ class PlannerRepositoryTest {
         assertEquals(listOf(firstStart), afterSkip.map { it.occurrenceStartAt })
     }
 
+    @Test
+    fun dailyRecurrenceExpandsByCustomInterval() = runBlocking {
+        val candidate = repository.createCandidate("medicine", "internal", receivedAt = 1L)
+        val firstStart = epochMillis(2026, 5, 5, 9, 0)
+        repository.updateCandidate(candidate.id, "Medicine", firstStart, null, null)
+
+        val result = repository.saveFromCandidate(
+            candidateId = candidate.id,
+            selectedStatus = ScheduleStatus.Confirmed,
+            titleOverride = null,
+            recurrenceInput = RecurrenceInput.Daily(intervalDays = 2),
+        )
+
+        assertTrue(result is SaveResult.Saved)
+        val rangeStart = epochMillis(2026, 5, 5, 0, 0)
+        val rangeEnd = epochMillis(2026, 5, 11, 0, 0)
+        val occurrences = repository.getExpandedSchedules(rangeStart, rangeEnd)
+        assertEquals(
+            listOf(
+                epochMillis(2026, 5, 5, 9, 0),
+                epochMillis(2026, 5, 7, 9, 0),
+                epochMillis(2026, 5, 9, 9, 0),
+            ),
+            occurrences.map { it.occurrenceStartAt },
+        )
+    }
+
+    @Test
+    fun monthlyRecurrenceUsesLastDayWhenTargetDayDoesNotExist() = runBlocking {
+        val candidate = repository.createCandidate("monthly close", "internal", receivedAt = 1L)
+        val firstStart = epochMillis(2026, 1, 31, 10, 0)
+        repository.updateCandidate(candidate.id, "Close Books", firstStart, null, null)
+
+        val result = repository.saveFromCandidate(
+            candidateId = candidate.id,
+            selectedStatus = ScheduleStatus.Confirmed,
+            titleOverride = null,
+            recurrenceInput = RecurrenceInput.Monthly(),
+        )
+
+        assertTrue(result is SaveResult.Saved)
+        val rangeStart = epochMillis(2026, 1, 1, 0, 0)
+        val rangeEnd = epochMillis(2026, 4, 1, 0, 0)
+        val occurrences = repository.getExpandedSchedules(rangeStart, rangeEnd)
+        assertEquals(
+            listOf(
+                epochMillis(2026, 1, 31, 10, 0),
+                epochMillis(2026, 2, 28, 10, 0),
+                epochMillis(2026, 3, 31, 10, 0),
+            ),
+            occurrences.map { it.occurrenceStartAt },
+        )
+    }
+
+    @Test
+    fun weeklyRecurrenceStoresCustomInterval() = runBlocking {
+        val candidate = repository.createCandidate("biweekly", "internal", receivedAt = 1L)
+        val firstStart = epochMillis(2026, 5, 4, 10, 0)
+        repository.updateCandidate(candidate.id, "Biweekly", firstStart, null, null)
+
+        val result = repository.saveFromCandidate(
+            candidateId = candidate.id,
+            selectedStatus = ScheduleStatus.Confirmed,
+            titleOverride = null,
+            recurrenceInput = RecurrenceInput.Weekly(intervalWeeks = 2),
+        )
+
+        assertTrue(result is SaveResult.Saved)
+        val rule = repository.getRecurrenceRule((result as SaveResult.Saved).schedule.id)
+        assertEquals("weekly", rule?.frequency)
+        assertEquals(2, rule?.interval)
+
+        val occurrences = repository.getExpandedSchedules(
+            epochMillis(2026, 5, 4, 0, 0),
+            epochMillis(2026, 6, 1, 0, 0),
+        )
+        assertEquals(
+            listOf(
+                epochMillis(2026, 5, 4, 10, 0),
+                epochMillis(2026, 5, 18, 10, 0),
+            ),
+            occurrences.map { it.occurrenceStartAt },
+        )
+    }
+
     private fun epochMillis(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =
         LocalDateTime.of(year, month, day, hour, minute).atZone(zoneId).toInstant().toEpochMilli()
 }

@@ -1,16 +1,11 @@
-﻿# Repository Agent Instructions
+# Repository Agent Instructions
 
-## Documentation Maintenance
+## Documentation
 
-- When changing app behavior, architecture, public workflows, or any function documented in `docs/spec_func.md`, update only the affected function/method descriptions in `docs/spec_func.md` so they describe the current behavior.
-- Do not append changelog-style sections, date-based update notes, or prose that explains what changed in `docs/spec_func.md`; remove obsolete change-description notes and keep the file as a current function-level specification.
+When changing app behavior, architecture, public workflows, or functions documented in `docs/spec_func.md`, update only the affected descriptions so the file remains a current function-level spec. Do not add changelog/date notes or prose about what changed.
 
-## Android Release Workflow
+## Android Release
 
-- Preserve the current app version unless the user explicitly requests a version bump. The active release version is read from `.env` or CI environment variables via `ANDROID_VERSION_CODE` and `ANDROID_VERSION_NAME`.
-- When the user asks to create an AAB, release, upload, publish, or deploy the Android app, automate the full Play Console deployment path instead of stopping at local bundle generation.
-- Use `.\gradlew.bat :app:publishAab --no-daemon` on Windows for Play Console deployment. This task builds the signed release AAB and uploads it to the configured Google Play track through the Gradle Play Publisher plugin.
-- Before publishing, verify that release signing and Play publishing environment values are present: `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `PLAY_SERVICE_ACCOUNT_JSON_PATH`.
-- Treat `PLAY_TRACK` and `PLAY_RELEASE_STATUS` as deployment controls from `.env` or CI. Do not silently change them; report the configured target track/status in the final response.
-- If publishing fails because credentials, signing files, Gradle wrapper access, or network permissions are unavailable, surface the exact blocker and retry with the required approval when appropriate.
-- After a successful publish, report the version name, version code, target track, release status, and generated AAB path.
+Preserve the current app version unless explicitly asked to bump it; version values come from `.env` or CI via `ANDROID_VERSION_CODE` and `ANDROID_VERSION_NAME`.
+
+For AAB/release/upload/publish/deploy requests, run the full Play Console path with `.\gradlew.bat :app:publishAab --no-daemon`. Before publishing, verify `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `PLAY_SERVICE_ACCOUNT_JSON_PATH`. Respect configured `PLAY_TRACK` and `PLAY_RELEASE_STATUS`, retry with approval when blocked by credentials/files/network, and report version name/code, track, status, and AAB path on success.

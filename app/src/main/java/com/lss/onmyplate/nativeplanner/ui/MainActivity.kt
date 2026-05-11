@@ -165,7 +165,7 @@ sealed interface Route {
 
 private enum class MainTab(val label: String, val route: Route, val imageRes: Int, val badgeText: String? = null) {
     Schedule("일정", Route.Schedule, R.drawable.mascot_note),
-    Basket("후보", Route.Basket, R.drawable.mascot_basket),
+    Basket("바구니", Route.Basket, R.drawable.mascot_basket),
     Sharing("공유", Route.Sharing, R.drawable.mascot_plane, badgeText = "준비중"),
     Settings("설정", Route.Settings, R.drawable.mascot_settings),
 }

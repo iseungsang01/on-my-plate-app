@@ -95,8 +95,9 @@ data class SharedSchedule(
 )
 data class SharedScheduleRecurrence(
     val frequency: String,
-    val intervalWeeks: Int,
-    val dayOfWeek: Int,
+    val interval: Int,
+    val dayOfWeek: Int?,
+    val dayOfMonth: Int?,
     val untilAt: Long?,
     val count: Int?,
 )
@@ -245,8 +246,10 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
 
     private fun ScheduleRecurrenceRuleEntity.toApiJson(): JSONObject = JSONObject()
         .put("frequency", frequency)
-        .put("intervalWeeks", intervalWeeks)
-        .put("dayOfWeek", dayOfWeek)
+        .put("interval", interval)
+        .put("intervalWeeks", if (frequency == "weekly") interval else JSONObject.NULL)
+        .put("dayOfWeek", dayOfWeek ?: JSONObject.NULL)
+        .put("dayOfMonth", dayOfMonth ?: JSONObject.NULL)
         .put("untilAt", untilAt?.let { Instant.ofEpochMilli(it).toString() } ?: JSONObject.NULL)
         .put("count", count ?: JSONObject.NULL)
 
@@ -256,8 +259,9 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
 
     private fun JSONObject.toSharedScheduleRecurrence(): SharedScheduleRecurrence = SharedScheduleRecurrence(
         frequency = optString("frequency", "weekly"),
-        intervalWeeks = optInt("intervalWeeks", optInt("interval_weeks", 1)),
-        dayOfWeek = optInt("dayOfWeek", optInt("day_of_week", 1)),
+        interval = optInt("interval", optInt("intervalWeeks", optInt("interval_weeks", 1))),
+        dayOfWeek = optNullableInt("dayOfWeek", "day_of_week"),
+        dayOfMonth = optNullableInt("dayOfMonth", "day_of_month"),
         untilAt = optNullableString("untilAt", "until_at")?.let { parseInstantMillis(it) },
         count = if (has("count") && !isNull("count")) optInt("count") else null,
     )
@@ -297,6 +301,13 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
     private fun JSONObject.optJSONArray(vararg names: String): JSONArray? {
         names.forEach { name ->
             if (has(name) && !isNull(name)) return optJSONArray(name)
+        }
+        return null
+    }
+
+    private fun JSONObject.optNullableInt(vararg names: String): Int? {
+        names.forEach { name ->
+            if (has(name) && !isNull(name)) return optInt(name)
         }
         return null
     }

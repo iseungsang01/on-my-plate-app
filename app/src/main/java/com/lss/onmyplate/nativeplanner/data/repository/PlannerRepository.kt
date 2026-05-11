@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import java.time.DayOfWeek
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -213,6 +215,22 @@ class PlannerRepository(
     private suspend fun saveRecurrence(schedule: ScheduleEntity, recurrenceInput: RecurrenceInput) {
         when (recurrenceInput) {
             RecurrenceInput.None -> recurrence.deleteRule(schedule.id)
+            is RecurrenceInput.Daily -> {
+                val now = System.currentTimeMillis()
+                recurrence.upsertRule(
+                    ScheduleRecurrenceRuleEntity(
+                        scheduleId = schedule.id,
+                        frequency = RecurrenceFrequencyDaily,
+                        interval = recurrenceInput.intervalDays.coerceAtLeast(1),
+                        dayOfWeek = null,
+                        dayOfMonth = null,
+                        untilAt = recurrenceInput.untilAt,
+                        count = recurrenceInput.count,
+                        createdAt = recurrence.getRule(schedule.id)?.createdAt ?: now,
+                        updatedAt = now,
+                    ),
+                )
+            }
             is RecurrenceInput.Weekly -> {
                 val now = System.currentTimeMillis()
                 val dayOfWeek = Instant.ofEpochMilli(schedule.startAt).atZone(scheduleZone).dayOfWeek.value
@@ -220,8 +238,26 @@ class PlannerRepository(
                     ScheduleRecurrenceRuleEntity(
                         scheduleId = schedule.id,
                         frequency = RecurrenceFrequencyWeekly,
-                        intervalWeeks = 1,
+                        interval = recurrenceInput.intervalWeeks.coerceAtLeast(1),
                         dayOfWeek = dayOfWeek,
+                        dayOfMonth = null,
+                        untilAt = recurrenceInput.untilAt,
+                        count = recurrenceInput.count,
+                        createdAt = recurrence.getRule(schedule.id)?.createdAt ?: now,
+                        updatedAt = now,
+                    ),
+                )
+            }
+            is RecurrenceInput.Monthly -> {
+                val now = System.currentTimeMillis()
+                val dayOfMonth = Instant.ofEpochMilli(schedule.startAt).atZone(scheduleZone).dayOfMonth
+                recurrence.upsertRule(
+                    ScheduleRecurrenceRuleEntity(
+                        scheduleId = schedule.id,
+                        frequency = RecurrenceFrequencyMonthly,
+                        interval = recurrenceInput.intervalMonths.coerceAtLeast(1),
+                        dayOfWeek = null,
+                        dayOfMonth = dayOfMonth,
                         untilAt = recurrenceInput.untilAt,
                         count = recurrenceInput.count,
                         createdAt = recurrence.getRule(schedule.id)?.createdAt ?: now,
@@ -254,35 +290,33 @@ class PlannerRepository(
                     emptyList()
                 }
             } else {
-                expandWeeklySchedule(schedule, rule, skipped, rangeStart, rangeEnd)
+                expandRecurringSchedule(schedule, rule, skipped, rangeStart, rangeEnd)
             }
-        }.sortedWith(compareBy<ScheduleOccurrence> { it.schedule.startAt }.thenBy { it.schedule.title })
+        }.sortedWith(compareBy<ScheduleOccurrence> { it.occurrenceStartAt }.thenBy { it.schedule.title })
     }
 
-    private fun expandWeeklySchedule(
+    private fun expandRecurringSchedule(
         schedule: ScheduleEntity,
         rule: ScheduleRecurrenceRuleEntity,
         skipped: Set<Pair<String, Long>>,
         rangeStart: Long,
         rangeEnd: Long,
     ): List<ScheduleOccurrence> {
-        if (rule.frequency != RecurrenceFrequencyWeekly || rule.intervalWeeks < 1) return emptyList()
+        if (rule.interval < 1) return emptyList()
         val firstStart = Instant.ofEpochMilli(schedule.startAt).atZone(scheduleZone)
-        val rangeStartDate = Instant.ofEpochMilli(rangeStart).atZone(scheduleZone).toLocalDate()
-        val weeksBetween = ChronoUnit.WEEKS.between(firstStart.toLocalDate(), rangeStartDate).coerceAtLeast(0)
-        var occurrenceIndex = weeksBetween / rule.intervalWeeks
-        var occurrenceStart = firstStart.plusWeeks(occurrenceIndex * rule.intervalWeeks.toLong())
+        var occurrenceIndex = estimateOccurrenceIndex(firstStart.toLocalDateTime(), rangeStart, rule)
+        var occurrenceStart = occurrenceStartAt(firstStart.toLocalDateTime(), rule, occurrenceIndex)
         while (occurrenceStart.toInstant().toEpochMilli() < rangeStart) {
             occurrenceIndex += 1
-            occurrenceStart = occurrenceStart.plusWeeks(rule.intervalWeeks.toLong())
+            occurrenceStart = occurrenceStartAt(firstStart.toLocalDateTime(), rule, occurrenceIndex)
         }
 
         val occurrences = mutableListOf<ScheduleOccurrence>()
         while (occurrenceStart.toInstant().toEpochMilli() < rangeEnd) {
             val occurrenceStartAt = occurrenceStart.toInstant().toEpochMilli()
-            if (rule.count != null && occurrenceIndex >= rule.count) break
+            if (rule.count != null && occurrenceIndex >= rule.count.toLong()) break
             if (rule.untilAt != null && occurrenceStartAt > rule.untilAt) break
-            if (occurrenceStart.dayOfWeek == DayOfWeek.of(rule.dayOfWeek) && (schedule.id to occurrenceStartAt) !in skipped) {
+            if (matchesRecurrenceAnchor(occurrenceStart.toLocalDateTime(), rule) && (schedule.id to occurrenceStartAt) !in skipped) {
                 val delta = occurrenceStartAt - schedule.startAt
                 occurrences += ScheduleOccurrence(
                     schedule = schedule.copy(
@@ -295,14 +329,50 @@ class PlannerRepository(
                 )
             }
             occurrenceIndex += 1
-            occurrenceStart = occurrenceStart.plusWeeks(rule.intervalWeeks.toLong())
+            occurrenceStart = occurrenceStartAt(firstStart.toLocalDateTime(), rule, occurrenceIndex)
         }
         return occurrences
     }
 
+    private fun estimateOccurrenceIndex(firstStart: LocalDateTime, rangeStart: Long, rule: ScheduleRecurrenceRuleEntity): Long {
+        val rangeStartDateTime = Instant.ofEpochMilli(rangeStart).atZone(scheduleZone).toLocalDateTime()
+        val rawDistance = when (rule.frequency) {
+            RecurrenceFrequencyDaily -> ChronoUnit.DAYS.between(firstStart.toLocalDate(), rangeStartDateTime.toLocalDate())
+            RecurrenceFrequencyWeekly -> ChronoUnit.WEEKS.between(firstStart.toLocalDate(), rangeStartDateTime.toLocalDate())
+            RecurrenceFrequencyMonthly -> ChronoUnit.MONTHS.between(
+                YearMonth.from(firstStart),
+                YearMonth.from(rangeStartDateTime),
+            )
+            else -> return 0
+        }.coerceAtLeast(0)
+        return rawDistance / rule.interval
+    }
+
+    private fun occurrenceStartAt(firstStart: LocalDateTime, rule: ScheduleRecurrenceRuleEntity, occurrenceIndex: Long) =
+        when (rule.frequency) {
+            RecurrenceFrequencyDaily -> firstStart.plusDays(occurrenceIndex * rule.interval.toLong())
+            RecurrenceFrequencyWeekly -> firstStart.plusWeeks(occurrenceIndex * rule.interval.toLong())
+            RecurrenceFrequencyMonthly -> {
+                val targetMonth = YearMonth.from(firstStart).plusMonths(occurrenceIndex * rule.interval.toLong())
+                val targetDay = (rule.dayOfMonth ?: firstStart.dayOfMonth).coerceAtMost(targetMonth.lengthOfMonth())
+                targetMonth.atDay(targetDay).atTime(firstStart.toLocalTime())
+            }
+            else -> firstStart
+        }.atZone(scheduleZone)
+
+    private fun matchesRecurrenceAnchor(occurrenceStart: LocalDateTime, rule: ScheduleRecurrenceRuleEntity): Boolean =
+        when (rule.frequency) {
+            RecurrenceFrequencyDaily -> true
+            RecurrenceFrequencyWeekly -> rule.dayOfWeek?.let { occurrenceStart.dayOfWeek == DayOfWeek.of(it) } == true
+            RecurrenceFrequencyMonthly -> true
+            else -> false
+        }
+
     companion object {
         private val scheduleZone: ZoneId = ZoneId.of("Asia/Seoul")
+        private const val RecurrenceFrequencyDaily = "daily"
         private const val RecurrenceFrequencyWeekly = "weekly"
+        private const val RecurrenceFrequencyMonthly = "monthly"
         private const val RecurrenceExceptionActionSkip = "skip"
     }
 }

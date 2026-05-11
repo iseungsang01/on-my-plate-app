@@ -20,8 +20,9 @@ import androidx.room.PrimaryKey
 data class ScheduleRecurrenceRuleEntity(
     @PrimaryKey val scheduleId: String,
     val frequency: String,
-    val intervalWeeks: Int,
-    val dayOfWeek: Int,
+    val interval: Int,
+    val dayOfWeek: Int?,
+    val dayOfMonth: Int?,
     val untilAt: Long?,
     val count: Int?,
     val createdAt: Long,

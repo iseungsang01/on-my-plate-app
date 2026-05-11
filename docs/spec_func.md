@@ -288,7 +288,7 @@
   - Calls `GET /api/planner/share/groups/{groupId}/schedules?includeDummy=...` and returns schedules with recurrence metadata sorted by start time.
 
 - `ScheduleEntity.toApiJson(recurrenceRule, recurrenceExceptions)`
-  - 저장 일정과 주간 반복 규칙/skip 예외를 planner API 요청 JSON으로 변환합니다.
+  - 저장 일정과 일간/주간/월간 반복 규칙/skip 예외를 planner API 요청 JSON으로 변환합니다.
 
 - `JSONObject.toSharedSchedule()` / `JSONObject.toSharedScheduleRecurrence()` / `JSONArray?.toRecurrenceExceptions()`
   - 공유 API 응답의 일정, 반복 규칙, 반복 예외를 Android 모델로 파싱합니다.
@@ -351,7 +351,7 @@
   - 저장된 최종 일정을 수정합니다.
   - 제목은 blank일 수 없고, 시작 시각 입력이 null이면 기존 시작 시각을 유지합니다.
   - 장소/메모 blank는 null로 저장하며 `updatedAt`을 현재 시각으로 갱신합니다.
-  - 반복 입력이 전달되면 주간 반복 규칙을 저장하거나 반복 없음으로 삭제합니다.
+  - 반복 입력이 전달되면 일간/주간/월간 반복 규칙을 저장하거나 반복 없음으로 삭제합니다.
 
 - `skipRecurringOccurrence(scheduleId, occurrenceStartAt)`
   - 특정 반복 occurrence를 건너뛰는 예외를 저장합니다.
@@ -365,13 +365,14 @@
   - 후보 시작 시각이 없거나 선택 상태가 `Uncertain`이면 일정 상태를 `uncertain`으로 강제합니다.
 
 - `saveRecurrence(schedule, recurrenceInput)`
-  - 반복 없음이면 해당 일정의 반복 규칙을 삭제하고, 주간 반복이면 일정 시작 요일과 반복 종료/횟수 조건을 저장합니다.
+  - 반복 없음이면 해당 일정의 반복 규칙을 삭제하고, 일간/주간/월간 반복이면 frequency, interval, 기준 요일/일자, 반복 종료/횟수 조건을 저장합니다.
 
 - `expandScheduleOccurrences(savedSchedules, rules, exceptions, rangeStart, rangeEnd)`
-  - 단일 일정은 범위 안에 있을 때 occurrence로 포함하고, 반복 일정은 `expandWeeklySchedule` 결과로 대체합니다.
+  - 단일 일정은 범위 안에 있을 때 occurrence로 포함하고, 반복 일정은 `expandRecurringSchedule` 결과로 대체합니다.
 
-- `expandWeeklySchedule(schedule, rule, skipped, rangeStart, rangeEnd)`
-  - 주간 반복 규칙을 기준으로 범위 안의 occurrence를 생성하고, skip 예외에 해당하는 occurrence는 제외합니다.
+- `expandRecurringSchedule(schedule, rule, skipped, rangeStart, rangeEnd)`
+  - 일간/주간/월간 반복 규칙을 기준으로 범위 안의 occurrence를 생성하고, skip 예외에 해당하는 occurrence는 제외합니다.
+  - 월간 반복에서 기준 일자가 없는 달은 해당 달의 마지막 날로 occurrence를 생성합니다.
 
 - `SaveAttempt`
   - 저장 전 상태 확인 결과입니다: `MissingCandidate`, `NeedsUncertain`, `Ready`, `Conflict`.
@@ -536,21 +537,23 @@
 ### `ui/PlannerScreen.kt`
 
 - `BasketScreen(repository, onOpenCandidate)`
-  - `observePendingCandidates()`를 구독해 아직 처리되지 않은 약속 후보를 표시합니다.
-  - 전체/확정 가능/정보 부족 통계 pill과 필터 chip을 제공합니다.
+  - `observePendingCandidates()`를 구독해 아직 처리되지 않아 확인이 필요한 애매한 일정을 표시합니다.
+  - 화면 제목을 `약속 바구니`로 표시하고, 상단 문구는 체크할 약속 수를 안내합니다.
   - 사용자가 약속 메시지를 직접 입력하면 `createCandidate`로 후보를 만들고 후보 상세 화면으로 이동합니다.
-  - 후보 목록은 `CandidateBasketCard`로 표시하며, 제목/시간/장소와 확정 가능 여부를 보여줍니다.
-  - 필터 결과가 비어 있으면 빈 바구니 안내 카드를 표시합니다.
+  - 후보 목록은 `CandidateBasketCard`로 표시하며, 제목/시간/장소와 확인 필요 상태를 보여줍니다.
+  - pending 후보가 없으면 체크할 애매한 일정이 없다는 안내 카드를 표시합니다.
+  - 하단의 `확정한 일정` 접힘 섹션에서 `observeExpandedSchedules(rangeStart, rangeEnd)`로 저장된 일정과 반복 occurrence를 함께 표시합니다.
+  - 확정 일정 필터는 `하루`, `7일`, `한 달`, `기간`이며, `기간`은 시작일 00:00부터 종료일 다음날 00:00 전까지 조회합니다.
 
 - `CandidateBasketCard(candidate, onClick, modifier)`
   - 후보 카드 클릭 시 후보 상세 편집 화면을 엽니다.
-  - 제목과 시작 시간이 있으면 `확정 가능`, 부족하면 `수정 필요` chip과 success/warning accent를 표시합니다.
+  - 제목과 시작 시간이 있으면 `확인 후 저장`, 부족하면 `정보 확인 필요` chip과 success/warning accent를 표시합니다.
 
 ### `ui/ScheduleEditScreen.kt`
 
 - `ScheduleEditScreen(repository, scheduleId, occurrenceStartAt, onBack)`
   - `observeSchedule(scheduleId)`로 저장 일정 1건을 관찰합니다.
-  - 제목, 시작/종료 시각, 장소, 메모, 상태, 매주 반복 여부, 반복 종료 시각을 편집합니다.
+  - 제목, 시작/종료 시각, 장소, 메모, 상태, 반복 없음/매일/매주/매월/맞춤 반복, 반복 종료 시각을 편집합니다.
   - 반복 occurrence에서 열린 경우 `skipRecurringOccurrence`로 해당 occurrence만 건너뛸 수 있습니다.
   - 제목과 시작 시각이 유효할 때 `PlannerRepository.updateSchedule`로 저장하고 일정 화면으로 돌아갑니다.
 
@@ -581,7 +584,8 @@
 
 - `CandidateEditScreen(repository, candidateId, onDone, onConflict, onBack)`
   - 후보 ID로 약속 후보를 관찰합니다.
-  - 후보의 제목, 시작/종료 날짜와 시간, 장소, 매주 반복 여부, 반복 종료 시각을 편집할 수 있습니다.
+  - 후보의 제목, 시작/종료 날짜와 시간, 장소, 반복 없음/매일/매주/매월/맞춤 반복, 반복 종료 시각을 편집할 수 있습니다.
+  - 반복 기본값은 원문 내용과 관계없이 `반복 안함`입니다.
   - 원문 메시지, 신뢰도 progress, 상태 선택 chip을 표시합니다.
   - 후보가 없으면 후보를 찾을 수 없다는 안내를 표시합니다.
   - 저장 시 먼저 `updateCandidate`로 편집 값을 반영한 뒤 반복 입력과 함께 `saveFromCandidate`를 호출합니다.
@@ -822,7 +826,7 @@
   - 공유 그룹 접근 권한과 `Authorization: Bearer <session-token>` 인증 값을 검증합니다.
 
 - `readSchedulePayload(request)` / `readRecurrenceRule(value)` / `readRecurrenceExceptions(value)`
-  - 요청 JSON에서 일정 본문, 주간 반복 규칙, skip 예외 목록을 읽고 유효성을 검사합니다.
+  - 요청 JSON에서 일정 본문, 일간/주간/월간 반복 규칙, skip 예외 목록을 읽고 유효성을 검사합니다.
 
 - `saveScheduleRecurrence(scheduleId, recurrence, exceptions, ruleTable, exceptionTable)`
   - 반복 규칙이 없으면 규칙/예외를 삭제하고, 있으면 규칙을 upsert한 뒤 예외 목록을 replace합니다.
@@ -862,7 +866,7 @@
 
 - `ScheduleRecurrenceRuleEntity`
   - 저장 일정에 연결된 반복 규칙입니다.
-  - 주간 반복 frequency, 반복 간격, 요일, 종료 시각/횟수, 생성/수정 시각을 보관합니다.
+  - 일간/주간/월간 frequency, 반복 간격, 기준 요일/일자, 종료 시각/횟수, 생성/수정 시각을 보관합니다.
 
 ### `data/entity/ScheduleRecurrenceExceptionEntity.kt`
 
@@ -878,4 +882,14 @@
 
 - `RecurrenceInput`
   - 저장/수정 화면에서 repository로 전달하는 반복 입력입니다.
-  - 반복 없음 또는 주간 반복과 종료 조건을 표현합니다.
+  - 반복 없음 또는 일간/주간/월간 반복과 interval, 종료 조건을 표현합니다.
+
+## Build And Release
+
+### `scripts/publish_aab.py`
+
+- `main()`
+  - Loads release values from `.env` and the process environment.
+  - Verifies that release signing and Play publishing variables are present before running the upload.
+  - Runs `gradlew.bat :app:publishAab --no-daemon` on Windows, which builds the signed release AAB and uploads it to the configured Google Play track.
+  - Prints the expected release AAB path after a successful publish.

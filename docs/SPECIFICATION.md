@@ -176,9 +176,12 @@ This document describes the current native Android implementation. It is intenti
 
 `ui/PlannerScreen.kt`
 
-- Shows pending candidates and saved schedules.
-- Pending candidates with no title display `제목 입력 필요`.
-- Opens the candidate edit screen when a pending chip is tapped.
+- Shows pending candidates as ambiguous appointments that need checking.
+- Direct text entry creates a candidate and opens the candidate edit screen through the `플래너에 넣기` action.
+- Pending candidates with no title display `무슨 약속인지 확인 필요`.
+- Opens the candidate edit screen when a pending card or chip is tapped.
+- Keeps saved schedules in a collapsed `확정한 일정` section with `하루`, `7일`, `한 달`, and date-range filters.
+- Uses `observeExpandedSchedules(rangeStart, rangeEnd)` for the saved schedule section so recurring occurrences are included.
 
 `ui/CandidateEditScreen.kt`
 
