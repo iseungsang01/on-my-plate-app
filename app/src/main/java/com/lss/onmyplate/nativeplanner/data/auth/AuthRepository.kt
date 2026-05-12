@@ -17,25 +17,16 @@ class AuthRepository(context: Context) {
 
     fun isConfigured(): Boolean = client.isConfigured()
     fun hasSession(): Boolean = sessionToken() != null
-    fun isGuestMode(): Boolean = sessionPrefs.getBoolean(KEY_GUEST_MODE, false)
-    fun hasAppAccess(): Boolean = hasSession() || isGuestMode()
+    fun hasAppAccess(): Boolean = hasSession()
     fun sessionToken(): String? = sessionPrefs.getString(BuildConfig.PLANNER_SESSION_TOKEN_KEY, null)?.takeIf { it.isNotBlank() }
 
     fun clearSession() {
         sessionPrefs.edit().remove(BuildConfig.PLANNER_SESSION_TOKEN_KEY).apply()
     }
 
-    fun enterGuestMode() {
-        sessionPrefs.edit()
-            .remove(BuildConfig.PLANNER_SESSION_TOKEN_KEY)
-            .putBoolean(KEY_GUEST_MODE, true)
-            .apply()
-    }
-
     fun clearAccess() {
         sessionPrefs.edit()
             .remove(BuildConfig.PLANNER_SESSION_TOKEN_KEY)
-            .remove(KEY_GUEST_MODE)
             .apply()
     }
 
@@ -53,13 +44,8 @@ class AuthRepository(context: Context) {
         val session = client.authenticate(path, identifier.trim(), password)
         sessionPrefs.edit()
             .putString(BuildConfig.PLANNER_SESSION_TOKEN_KEY, session.sessionToken)
-            .remove(KEY_GUEST_MODE)
             .apply()
         session
-    }
-
-    companion object {
-        private const val KEY_GUEST_MODE = "guest_mode"
     }
 }
 

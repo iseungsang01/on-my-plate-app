@@ -13,7 +13,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.lss.onmyplate.nativeplanner.OnMyPlateApp
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.repository.SaveAttempt
@@ -29,7 +28,6 @@ fun ConflictScreen(
     onDone: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as OnMyPlateApp
     var conflicts by remember { mutableStateOf<List<ScheduleEntity>>(emptyList()) }
     val candidate by repository.observeCandidate(candidateId).collectAsState(initial = null)
     val hasTitle = candidate?.extractedTitle?.isNotBlank() == true
@@ -86,8 +84,8 @@ fun ConflictScreen(
                     "time", "adjust" -> onEdit()
                     "hold" -> scope.launch {
                         when (val result = repository.saveFromCandidate(candidateId, ScheduleStatus.Uncertain, candidate?.extractedTitle)) {
-                            is SaveResult.Saved -> app.syncScheduleAsync(result.schedule)
-                            is SaveResult.SavedAsUncertain -> app.syncScheduleAsync(result.schedule)
+                            is SaveResult.Saved -> Unit
+                            is SaveResult.SavedAsUncertain -> Unit
                             else -> Unit
                         }
                         onDone()
@@ -107,8 +105,8 @@ fun ConflictScreen(
             onClick = {
                 scope.launch {
                     when (val result = repository.saveFromCandidate(candidateId, ScheduleStatus.Confirmed, candidate?.extractedTitle, force = true)) {
-                        is SaveResult.Saved -> app.syncScheduleAsync(result.schedule)
-                        is SaveResult.SavedAsUncertain -> app.syncScheduleAsync(result.schedule)
+                        is SaveResult.Saved -> Unit
+                        is SaveResult.SavedAsUncertain -> Unit
                         else -> Unit
                     }
                     onDone()

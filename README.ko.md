@@ -21,7 +21,7 @@
    - 앱을 열어 제목, 시작 시간, 종료 시간, 장소를 수정한 뒤 저장
 7. `PlannerRepository.saveFromCandidate`는 제목이 비어 있으면 일정을 만들지 않습니다.
 8. 후보 일정이 기존 일정과 겹치면, 사용자가 강제로 추가하기 전까지 충돌 알림/화면을 먼저 보여 줍니다.
-9. 저장된 일정은 Room에 로컬 저장되며 네이티브 홈 화면 위젯 스냅샷으로 동기화됩니다.
+9. 저장된 일정은 로그인 계정의 Supabase `planner-api` 개인 일정으로 저장되며 네이티브 홈 화면 위젯 스냅샷으로 동기화됩니다.
 
 파일 단위 구현 지도는 `docs/SPECIFICATION.ko.md`를 참고하세요. 영문 원문은 `README.md`와 `docs/SPECIFICATION.md`에 있습니다.
 
@@ -49,20 +49,20 @@ Unix 계열 셸에서는 다음을 사용합니다.
 
 ## MVP 범위
 
-- 네이티브 Android Kotlin, Jetpack Compose, Room, coroutines.
+- 네이티브 Android Kotlin, Jetpack Compose, coroutines, Supabase Edge Function 기반 planner 데이터.
 - 한국어 규칙 기반 파서와 선택적 Gemini LLM 파싱.
 - 일정 제목은 공유 텍스트에서 파싱하지 않고 사용자가 직접 입력합니다.
 - `RemoteInput` 기반 알림 액션: `확정 저장`, `미정 저장`, `앱에서 수정`.
-- Room 일정 기반 로컬 충돌 감지.
+- 로그인 계정의 Supabase 개인 일정 기반 충돌 감지.
 - 후보 편집 화면과 충돌 해결 화면.
 
 카카오톡 스크래핑, 로그인, 백그라운드 채팅 감시, 웹 앱, 클라우드 동기화는 포함하지 않습니다.
 
 ## 네이티브 위젯 스냅샷 범위
 
-네이티브 Android 위젯은 이 MVP에 포함되며, 네이티브 플래너가 저장한 Room 기반 일정만 렌더링합니다.
+네이티브 Android 위젯은 이 MVP에 포함되며, `planner-api`에서 가져온 로그인 계정의 개인 일정을 렌더링합니다.
 
-- `PlannerWidgetSync`는 `native-room-schedules-v1` 요약 스냅샷을 씁니다.
+- `PlannerWidgetSync`는 `native-supabase-schedules-v1` 요약 스냅샷을 씁니다.
 - 스냅샷에는 `Asia/Seoul` 로컬 날짜별로 묶인 `manualEventsByDate`가 포함됩니다.
 - `autoPlans`, 카테고리 열, 생성된 `days`는 의도적으로 쓰지 않습니다. 네이티브 위젯은 `manualEventsByDate`에서 표시할 주간 범위를 계산합니다.
 - 재사용 가능한 `widget/` 번들은 수동 일간 일정과 자동/카테고리 계획을 이미 가진 호스트 앱을 위한 더 넓은 스냅샷 모델을 제공합니다. 계약은 `widget/README.md`를 참고하세요.
@@ -79,6 +79,6 @@ Unix 계열 셸에서는 다음을 사용합니다.
 
 ## Supabase Edge Function planner API
 
-Android 앱은 앱 로그인, 일정 동기화, 공유에 단일 Supabase Edge Function `planner-api`를 사용합니다. `.env` 또는 CI에서 `PLANNER_API_BASE_URL`을 `https://<project-ref>.supabase.co/functions/v1/planner-api`로 설정합니다. Supabase Auth는 사용하지 않습니다. `planner-api`는 첫 로그인 때 자체 `planner_users` row를 만들고, 비밀번호는 user id로 salt 처리한 해시만 저장하며, user id를 앱 세션 토큰으로 반환한 뒤 서버 전용 service-role 권한으로 Supabase에 씁니다.
+Android 앱은 앱 로그인, 후보 저장, 개인 일정, 위젯 동기화, 공유에 단일 Supabase Edge Function `planner-api`를 사용합니다. `.env` 또는 CI에서 `PLANNER_API_BASE_URL`을 `https://<project-ref>.supabase.co/functions/v1/planner-api`로 설정합니다. Supabase Auth는 사용하지 않습니다. `planner-api`는 첫 로그인 때 자체 `planner_users` row를 만들고, 비밀번호는 user id로 salt 처리한 해시만 저장하며, user id를 앱 세션 토큰으로 반환한 뒤 서버 전용 service-role 권한으로 Supabase에 씁니다.
 
-Android never stores service-role credentials and no longer depends on any PC-local backend. Shared-screen-only dummy schedules are read from `planner_dummy_schedules` through the API and are never stored in Room or the widget. See `docs/supabaseSQL.md` for the server-side schema and RLS posture.
+Android never stores service-role credentials, does not read the old `on_my_plate_native.db` Room database, and no longer depends on any PC-local backend. Shared-screen-only dummy schedules are read from `planner_dummy_schedules` through the API and are never stored in personal schedules or the widget. See `docs/supabaseSQL.md` for the server-side schema and RLS posture.

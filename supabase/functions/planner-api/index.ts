@@ -37,7 +37,7 @@ const PUBLIC_ID_PREFIX = "pb";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
 };
 
 const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -82,9 +82,46 @@ Deno.serve(async (request) => {
       if (method === "POST") return await uploadSharedSchedule(userId, groupId, request);
     }
 
-    if (method === "POST" && path === "/api/planner/schedules") {
+    if (path === "/api/planner/schedules") {
       const userId = await requireUserId(request);
-      return await uploadPersonalSchedule(userId, request);
+      if (method === "GET") return await listPersonalSchedules(userId);
+      if (method === "POST") return await uploadPersonalSchedule(userId, request);
+    }
+
+    const personalScheduleMatch = path.match(/^\/api\/planner\/schedules\/([^/]+)$/);
+    if (personalScheduleMatch) {
+      const userId = await requireUserId(request);
+      const scheduleId = decodeURIComponent(personalScheduleMatch[1]);
+      if (method === "GET") return await getPersonalSchedule(userId, scheduleId);
+      if (method === "PATCH") return await updatePersonalSchedule(userId, scheduleId, request);
+    }
+
+    const personalScheduleExceptionMatch = path.match(/^\/api\/planner\/schedules\/([^/]+)\/recurrence-exceptions$/);
+    if (personalScheduleExceptionMatch) {
+      const userId = await requireUserId(request);
+      const scheduleId = decodeURIComponent(personalScheduleExceptionMatch[1]);
+      if (method === "POST") return await addPersonalScheduleRecurrenceException(userId, scheduleId, request);
+    }
+
+    if (path === "/api/planner/candidates") {
+      const userId = await requireUserId(request);
+      if (method === "GET") return await listCandidates(userId, url.searchParams.get("status"));
+      if (method === "POST") return await createCandidate(userId, request);
+    }
+
+    const candidateMatch = path.match(/^\/api\/planner\/candidates\/([^/]+)$/);
+    if (candidateMatch) {
+      const userId = await requireUserId(request);
+      const candidateId = decodeURIComponent(candidateMatch[1]);
+      if (method === "GET") return await getCandidate(userId, candidateId);
+      if (method === "PATCH") return await updateCandidate(userId, candidateId, request);
+    }
+
+    const candidateDiscardMatch = path.match(/^\/api\/planner\/candidates\/([^/]+)\/discard$/);
+    if (candidateDiscardMatch) {
+      const userId = await requireUserId(request);
+      const candidateId = decodeURIComponent(candidateDiscardMatch[1]);
+      if (method === "POST") return await discardCandidate(userId, candidateId);
     }
 
     if (method === "POST" && path === "/api/planner/feedback") {
@@ -361,6 +398,159 @@ async function uploadPersonalSchedule(userId: string, request: Request): Promise
   return jsonResponse({ schedule: toScheduleJson(schedule[0]) });
 }
 
+async function listPersonalSchedules(userId: string): Promise<Response> {
+  const { data: schedules, error } = await db
+    .from("planner_personal_schedules")
+    .select("id,local_schedule_id,title,start_at,end_at,location,memo,status,source_text,source_app,created_at,updated_at")
+    .eq("created_by", userId)
+    .order("start_at", { ascending: true });
+  if (error) throw apiError(500, error.message);
+  const withRecurrence = await attachRecurrenceToSchedules(
+    schedules ?? [],
+    "planner_personal_schedule_recurrence_rules",
+    "planner_personal_schedule_recurrence_exceptions",
+  );
+  return jsonResponse({ schedules: withRecurrence.map(toScheduleJson) });
+}
+
+async function getPersonalSchedule(userId: string, scheduleId: string): Promise<Response> {
+  const schedule = await personalScheduleForUser(userId, scheduleId);
+  const withRecurrence = await attachRecurrenceToSchedules(
+    [schedule],
+    "planner_personal_schedule_recurrence_rules",
+    "planner_personal_schedule_recurrence_exceptions",
+  );
+  return jsonResponse({ schedule: toScheduleJson(withRecurrence[0]) });
+}
+
+async function updatePersonalSchedule(userId: string, scheduleId: string, request: Request): Promise<Response> {
+  await personalScheduleForUser(userId, scheduleId);
+  const payload = await readSchedulePayload(request);
+  const { data, error } = await db
+    .from("planner_personal_schedules")
+    .update(payload.schedule)
+    .eq("id", scheduleId)
+    .eq("created_by", userId)
+    .select("id,local_schedule_id,title,start_at,end_at,location,memo,status,source_text,source_app,created_at,updated_at")
+    .single();
+  if (error) throw apiError(500, error.message);
+  await saveScheduleRecurrence(
+    String(data.id),
+    payload.recurrence,
+    payload.recurrenceExceptions,
+    "planner_personal_schedule_recurrence_rules",
+    "planner_personal_schedule_recurrence_exceptions",
+  );
+  const withRecurrence = await attachRecurrenceToSchedules(
+    [data],
+    "planner_personal_schedule_recurrence_rules",
+    "planner_personal_schedule_recurrence_exceptions",
+  );
+  return jsonResponse({ schedule: toScheduleJson(withRecurrence[0]) });
+}
+
+async function addPersonalScheduleRecurrenceException(userId: string, scheduleId: string, request: Request): Promise<Response> {
+  await personalScheduleForUser(userId, scheduleId);
+  const body = await readJson(request);
+  const exception = readRecurrenceExceptions([body])[0];
+  const { error } = await db
+    .from("planner_personal_schedule_recurrence_exceptions")
+    .upsert(
+      {
+        schedule_id: scheduleId,
+        occurrence_start_at: exception.occurrenceStartAt,
+        action: exception.action,
+      },
+      { onConflict: "schedule_id,occurrence_start_at" },
+    );
+  if (error) throw apiError(500, error.message);
+  return await getPersonalSchedule(userId, scheduleId);
+}
+
+async function personalScheduleForUser(userId: string, scheduleId: string): Promise<Record<string, unknown>> {
+  const { data, error } = await db
+    .from("planner_personal_schedules")
+    .select("id,local_schedule_id,title,start_at,end_at,location,memo,status,source_text,source_app,created_at,updated_at")
+    .eq("id", scheduleId)
+    .eq("created_by", userId)
+    .maybeSingle();
+  if (error) throw apiError(500, error.message);
+  if (!data) throw apiError(404, "?쇱젙???李얠쓣 ???놁뒿?덈떎.");
+  return data;
+}
+
+async function createCandidate(userId: string, request: Request): Promise<Response> {
+  const payload = readCandidatePayload(await readJson(request));
+  const { data, error } = await db
+    .from("planner_candidates")
+    .insert({ ...payload, created_by: userId })
+    .select()
+    .single();
+  if (error) throw apiError(500, error.message);
+  return jsonResponse({ candidate: toCandidateJson(data) });
+}
+
+async function listCandidates(userId: string, status: string | null): Promise<Response> {
+  let query = db
+    .from("planner_candidates")
+    .select()
+    .eq("created_by", userId)
+    .order("created_at", { ascending: false });
+  if (status) query = query.eq("status", status);
+  const { data, error } = await query;
+  if (error) throw apiError(500, error.message);
+  return jsonResponse({ candidates: (data ?? []).map(toCandidateJson) });
+}
+
+async function getCandidate(userId: string, candidateId: string): Promise<Response> {
+  const candidate = await candidateForUser(userId, candidateId);
+  return jsonResponse({ candidate: toCandidateJson(candidate) });
+}
+
+async function updateCandidate(userId: string, candidateId: string, request: Request): Promise<Response> {
+  await candidateForUser(userId, candidateId);
+  const body = await readJson(request);
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if ("extractedTitle" in body) updates.extracted_title = optionalString(body.extractedTitle) ?? "";
+  if ("extractedStartAt" in body) updates.extracted_start_at = optionalString(body.extractedStartAt);
+  if ("extractedEndAt" in body) updates.extracted_end_at = optionalString(body.extractedEndAt);
+  if ("extractedLocation" in body) updates.extracted_location = optionalString(body.extractedLocation);
+  if ("status" in body) {
+    const status = optionalString(body.status);
+    if (status !== "pending" && status !== "confirmed" && status !== "discarded") throw apiError(400, "Invalid candidate status.");
+    updates.status = status;
+  }
+  const { data, error } = await db
+    .from("planner_candidates")
+    .update(updates)
+    .eq("id", candidateId)
+    .eq("created_by", userId)
+    .select()
+    .single();
+  if (error) throw apiError(500, error.message);
+  return jsonResponse({ candidate: toCandidateJson(data) });
+}
+
+async function discardCandidate(userId: string, candidateId: string): Promise<Response> {
+  const request = new Request("http://local/api/planner/candidates", {
+    method: "PATCH",
+    body: JSON.stringify({ status: "discarded" }),
+  });
+  return await updateCandidate(userId, candidateId, request);
+}
+
+async function candidateForUser(userId: string, candidateId: string): Promise<Record<string, unknown>> {
+  const { data, error } = await db
+    .from("planner_candidates")
+    .select()
+    .eq("id", candidateId)
+    .eq("created_by", userId)
+    .maybeSingle();
+  if (error) throw apiError(500, error.message);
+  if (!data) throw apiError(404, "?쎌냽???李얠쓣 ???놁뒿?덈떎.");
+  return data;
+}
+
 async function submitFeedback(request: Request): Promise<Response> {
   const payload = readFeedbackPayload(await readJson(request));
   const { error } = await db.from("planner_feedback").insert({
@@ -527,6 +717,27 @@ function readFeedbackPayload(body: Record<string, unknown>): FeedbackPayload {
     sourceScreen,
     appVersionName,
     appVersionCode,
+  };
+}
+
+function readCandidatePayload(body: Record<string, unknown>): Record<string, unknown> {
+  const status = optionalString(body.status) ?? "pending";
+  if (status !== "pending" && status !== "confirmed" && status !== "discarded") {
+    throw apiError(400, "Invalid candidate status.");
+  }
+  return {
+    local_candidate_id: optionalString(body.localCandidateId),
+    raw_text: requiredString(body.rawText, "?쎌냽 ?띿뒪?몄? ?꾩슂?⑸땲??"),
+    source_app: optionalString(body.sourceApp),
+    extracted_title: optionalString(body.extractedTitle) ?? "",
+    extracted_start_at: optionalString(body.extractedStartAt),
+    extracted_end_at: optionalString(body.extractedEndAt),
+    extracted_location: optionalString(body.extractedLocation),
+    confidence: typeof body.confidence === "number" ? body.confidence : 0,
+    time_confidence: optionalString(body.timeConfidence) ?? "",
+    status,
+    created_at: optionalString(body.createdAt) ?? new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   };
 }
 
@@ -719,14 +930,38 @@ function toGroupJson(group: { id: string; name: string }): JsonObject {
 function toScheduleJson(schedule: Record<string, unknown>): JsonObject {
   return {
     id: String(schedule.id),
+    localScheduleId: optionalString(schedule.local_schedule_id),
     title: String(schedule.title),
     startAt: String(schedule.start_at),
     endAt: optionalString(schedule.end_at),
     location: optionalString(schedule.location),
+    memo: optionalString(schedule.memo),
     status: optionalString(schedule.status) ?? "planned",
+    sourceText: optionalString(schedule.source_text),
+    sourceApp: optionalString(schedule.source_app),
+    createdAt: optionalString(schedule.created_at),
+    updatedAt: optionalString(schedule.updated_at),
     isDummy: Boolean(schedule.is_dummy),
     recurrence: (schedule.recurrence as JsonObject | null | undefined) ?? null,
     recurrenceExceptions: (schedule.recurrence_exceptions as JsonValue[] | undefined) ?? [],
+  };
+}
+
+function toCandidateJson(candidate: Record<string, unknown>): JsonObject {
+  return {
+    id: String(candidate.id),
+    localCandidateId: optionalString(candidate.local_candidate_id),
+    rawText: String(candidate.raw_text),
+    sourceApp: optionalString(candidate.source_app),
+    extractedTitle: optionalString(candidate.extracted_title) ?? "",
+    extractedStartAt: optionalString(candidate.extracted_start_at),
+    extractedEndAt: optionalString(candidate.extracted_end_at),
+    extractedLocation: optionalString(candidate.extracted_location),
+    confidence: Number(candidate.confidence ?? 0),
+    timeConfidence: optionalString(candidate.time_confidence) ?? "",
+    status: optionalString(candidate.status) ?? "pending",
+    createdAt: optionalString(candidate.created_at),
+    updatedAt: optionalString(candidate.updated_at),
   };
 }
 

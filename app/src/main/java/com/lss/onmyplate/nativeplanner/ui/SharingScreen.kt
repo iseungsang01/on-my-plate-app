@@ -47,7 +47,7 @@ fun SharingScreen(
                     groups = emptyList()
                     selectedGroup = null
                     sharedSchedules = emptyList()
-                    message = "게스트 모드에서는 공유 기능을 사용할 수 없습니다."
+                    message = "로그인 후 공유 기능을 사용할 수 있습니다."
                     return@launch
                 }
                 if (!sharingRepository.isConfigured()) {
@@ -155,8 +155,8 @@ fun SharingScreen(
                     Text("공유 화면 전용 더미 일정 함께 보기")
                 }
             }
-            item { Text("내 로컬 일정 공유하기", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
-            if (localSchedules.isEmpty()) item { Text("공유할 로컬 일정이 없습니다.", color = FeedLoopColors.Secondary) }
+            item { Text("내 개인 일정 공유하기", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
+            if (localSchedules.isEmpty()) item { Text("공유할 개인 일정이 없습니다.", color = FeedLoopColors.Secondary) }
             items(localSchedules, key = { it.id }) { schedule ->
                 LocalShareRow(schedule = schedule, enabled = selectedGroup != null && !loading && canUseSharing) {
                     scope.launch {

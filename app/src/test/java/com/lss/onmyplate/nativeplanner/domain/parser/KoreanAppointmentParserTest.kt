@@ -32,6 +32,7 @@ class KoreanAppointmentParserTest {
         assertEquals(epochMillis(2026, 5, 8, 8, 0), parser.parse("내일 아침 운동", receivedAt).startAt)
         assertEquals(epochMillis(2026, 5, 8, 12, 0), parser.parse("내일 점심 식당 약속", receivedAt).startAt)
         assertEquals(epochMillis(2026, 5, 8, 19, 0), parser.parse("내일 저녁 강남에서 약속", receivedAt).startAt)
+        assertEquals(epochMillis(2026, 5, 8, 14, 0), parser.parse("내일 오후 두시에 보자", receivedAt).startAt)
         assertEquals(epochMillis(2026, 5, 8, 11, 30), parser.parse("내일 오전 11시 반 미팅", receivedAt).startAt)
         assertEquals(epochMillis(2026, 5, 8, 21, 0), parser.parse("내일 밤 9시 통화", receivedAt).startAt)
     }

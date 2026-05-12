@@ -102,7 +102,8 @@ class KoreanAppointmentParser(
     }
 
     private fun parseTime(text: String): TimeParse {
-        val colonTime = Regex("(오전|오후|저녁|밤)?\\s*(\\d{1,2})[:：](\\d{2})").find(text)
+        val normalizedText = normalizeKoreanHourNumbers(text)
+        val colonTime = Regex("(오전|오후|저녁|밤)?\\s*(\\d{1,2})[:：](\\d{2})").find(normalizedText)
         if (colonTime != null) {
             val meridiem = colonTime.groupValues[1]
             var hour = colonTime.groupValues[2].toInt()
@@ -112,7 +113,7 @@ class KoreanAppointmentParser(
             return TimeParse(LocalTime.of(hour.coerceIn(0, 23), minute.coerceIn(0, 59)), TimeConfidence.High)
         }
 
-        val explicit = Regex("(오전|오후|아침|점심|저녁|밤)?\\s*(\\d{1,2})시(?:\\s*(\\d{1,2})분|\\s*반)?").find(text)
+        val explicit = Regex("(오전|오후|아침|점심|저녁|밤)?\\s*(\\d{1,2})시(?:\\s*(\\d{1,2})분|\\s*반)?").find(normalizedText)
         if (explicit != null) {
             val meridiem = explicit.groupValues[1]
             var hour = explicit.groupValues[2].toInt()
@@ -137,11 +138,32 @@ class KoreanAppointmentParser(
         }
     }
 
+    private fun normalizeKoreanHourNumbers(text: String): String {
+        val hourWords = listOf(
+            "열두" to 12,
+            "열한" to 11,
+            "열" to 10,
+            "아홉" to 9,
+            "여덟" to 8,
+            "일곱" to 7,
+            "여섯" to 6,
+            "다섯" to 5,
+            "네" to 4,
+            "세" to 3,
+            "두" to 2,
+            "한" to 1,
+        )
+        return hourWords.fold(text) { current, (word, value) ->
+            current.replace(Regex("${Regex.escape(word)}\\s*시"), "${value}시")
+        }
+    }
+
     private fun parseLocation(text: String): String? {
+        val normalizedText = normalizeKoreanHourNumbers(text)
         Regex("(?:장소|위치)[:：]?\\s*([^\\n,]+)").find(text)?.let {
             return it.groupValues[1].trim().takeIf { value -> value.isNotBlank() }?.take(40)
         }
-        val cleaned = text
+        val cleaned = normalizedText
             .replace(Regex("(오늘|내일|모레|이번 주|다음 주|담주|\\d{1,2}월\\s*\\d{1,2}일)"), "")
             .replace(Regex(weekdayMap.keys.joinToString("|") { Regex.escape(it) }), "")
             .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}[:：]\\d{2}"), "")

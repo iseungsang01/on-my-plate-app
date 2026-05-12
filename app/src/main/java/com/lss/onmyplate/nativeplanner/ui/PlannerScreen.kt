@@ -75,7 +75,7 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("약속 바구니", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("플래너에 넣어 둔 애매한 일정을 확인해요. 체크할 약속 ${pending.size}개", style = MaterialTheme.typography.bodySmall, color = FeedLoopColors.Secondary)
+                Text("공유하거나 입력한 약속 후보를 정리해요. 확인할 후보 ${pending.size}개", style = MaterialTheme.typography.bodySmall, color = FeedLoopColors.Secondary)
             }
 
             Card(
@@ -85,7 +85,7 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
                 elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("애매한 일정 넣기", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("약속 후보 만들기", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     OutlinedTextField(
                         value = directInput,
                         onValueChange = { directInput = it },
@@ -119,13 +119,13 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
                         modifier = Modifier.fillMaxWidth(),
                         enabled = directInput.isNotBlank() && !isCreatingCandidate,
                         colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
-                    ) { Text(if (isCreatingCandidate) "분석 중..." else "플래너에 넣기") }
+                    ) { Text(if (isCreatingCandidate) "분석 중..." else "후보로 담기") }
                 }
             }
 
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item {
-                    Text("확인이 필요한 약속", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("정리할 약속 후보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 }
                 if (pending.isEmpty()) {
                     item { EmptyBasketCard() }
@@ -204,8 +204,8 @@ fun CandidateBasketCard(candidate: AppointmentCandidateEntity, onClick: () -> Un
 private fun EmptyBasketCard() {
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface), border = BorderStroke(1.dp, FeedLoopColors.Border)) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("체크할 애매한 일정이 없어요", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("메시지를 입력하거나 Android 공유 기능으로 보내면 확인할 약속으로 담깁니다.", color = FeedLoopColors.Secondary)
+            Text("정리할 약속 후보가 없어요", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("메시지를 입력하거나 Android 공유 기능으로 보내면 약속 후보로 담깁니다.", color = FeedLoopColors.Secondary)
         }
     }
 }

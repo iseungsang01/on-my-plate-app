@@ -5,7 +5,7 @@
 ## 핵심 처리 흐름 요약
 
 1. `ShareReceiverActivity.onCreate` 또는 `PlannerScreen`의 직접 입력에서 공유/입력 텍스트를 받습니다.
-2. `PlannerRepository.createCandidate`가 `KoreanAppointmentParser.parse`로 일정 후보를 파싱하고 Room에 저장합니다.
+2. `PlannerRepository.createCandidate`가 `KoreanAppointmentParser.parse`로 일정 후보를 파싱하고 `planner-api` 후보 API에 저장합니다.
 3. `AppointmentNotificationManager.showCandidate` 또는 `CandidateEditScreen`이 사용자에게 제목 입력을 요구합니다.
 4. `PlannerRepository.saveFromCandidate`가 제목 필수 조건, 미정 저장, 충돌 확인, 강제 저장, 반복 규칙 저장을 처리합니다.
 5. 저장된 `ScheduleEntity`와 반복 규칙/예외는 `observeExpandedSchedules`로 주간 occurrence가 된 뒤 `PlannerWidgetSync.saveSnapshot`으로 위젯 snapshot에 반영됩니다.
@@ -21,9 +21,9 @@
   - 알림 채널을 생성합니다.
   - 현재 주 범위의 단일/반복 occurrence 목록을 관찰하다가 변경될 때마다 `PlannerWidgetSync.saveSnapshot`을 호출해 홈 위젯 데이터를 갱신합니다.
 
-- `syncScheduleAsync(schedule)`
-  - 공유/planner API가 설정되어 있고 앱 세션 토큰이 있으면 저장 일정과 반복 규칙/예외를 개인 일정 API로 비동기 업로드합니다.
-  - 네트워크 동기화 실패가 로컬 저장/수정 동작을 되돌리지 않도록 실패를 내부에서 처리합니다.
+- `deleteDatabase("on_my_plate_native.db")`
+  - 앱 시작 시 기존 Room DB 파일과 WAL/SHM 파일을 삭제합니다.
+  - 앱은 기존 `on_my_plate_native.db`를 읽거나 마이그레이션하지 않습니다.
 
 ---
 
@@ -40,6 +40,10 @@
   - 알림 권한 요청 결과가 돌아오면 결과와 무관하게 보관된 공유 텍스트 저장을 계속 진행합니다.
 
 - `saveAndNotify()`
+  - 앱 세션이 없으면 공유 원문/공유 앱/수신 시각을 `MainActivity.sharedTextIntent`로 넘겨 로그인 후 후보 생성을 이어가게 합니다.
+  - 저장에 성공하고 후보 알림이 실제로 표시되면 앱 화면을 열지 않고 투명 공유 수신 Activity만 종료합니다.
+  - 저장에 성공했지만 알림 권한/앱 알림/채널 알림이 꺼져 있어 후보 알림을 표시할 수 없으면 후보 편집 화면으로 fallback 이동합니다.
+  - 저장에 실패하면 오류를 로그/토스트로 표시하고 바구니 route intent를 시작한 뒤 투명 공유 수신 Activity를 종료합니다.
   - 보관된 공유 텍스트로 `PlannerRepository.createCandidate`를 호출해 후보를 생성합니다.
   - 생성된 후보에 대해 `AppointmentNotificationManager.showCandidate`로 제목 입력 알림을 띄웁니다.
   - 투명 공유 수신 Activity를 종료합니다.
@@ -80,8 +84,11 @@
   - 연도가 없는 월/일이 이미 지난 날짜면 다음 해로 보정합니다.
 
 - `parseTime(text)`
-  - 오전/오후/저녁/밤, `HH:mm`, 한국어 시/분/반 표현을 `LocalTime`으로 변환합니다.
+  - 오전/오후/저녁/밤, `HH:mm`, 한국어 숫자/아라비아 숫자 기반 시/분/반 표현을 `LocalTime`으로 변환합니다.
   - 명확한 시간은 `High`, 애매한 숫자 시간은 `Medium`, 시간대 단어만 있는 경우는 `Low` 신뢰도로 반환합니다.
+
+- `normalizeKoreanHourNumbers(text)`
+  - `한시`, `두시`, `열한시` 같은 한글 시간 숫자를 로컬 파서가 처리할 수 있는 숫자 시각 표현으로 정규화합니다.
 
 - `parseLocation(text)`
   - `장소`/`위치` 같은 명시적 라벨과 “~에서”, “회의/미팅/약속” 주변 표현을 기준으로 장소 후보를 추출합니다.
@@ -141,85 +148,18 @@
 
 ---
 
-## Room 데이터베이스/DAO
+## Planner Data Models
 
-### `data/db/AppDatabase.kt`
+### `data/entity/*.kt`
 
-- `scheduleDao()`
-  - `ScheduleDao` 인스턴스를 제공합니다.
+- `ScheduleEntity`
+  - Room annotation 없이 앱 내부에서 개인 일정 API 응답과 UI 상태를 전달하는 일정 모델입니다.
 
-- `appointmentCandidateDao()`
-  - `AppointmentCandidateDao` 인스턴스를 제공합니다.
+- `AppointmentCandidateEntity`
+  - Room annotation 없이 앱 내부에서 후보 API 응답과 UI 상태를 전달하는 후보 모델입니다.
 
-- `scheduleRecurrenceDao()`
-  - 반복 규칙과 반복 예외를 다루는 `ScheduleRecurrenceDao` 인스턴스를 제공합니다.
-
-- `MIGRATION_1_2.migrate(db)`
-  - `appointment_candidates` 테이블에 `sourceApp` 컬럼이 없으면 추가합니다.
-
-- `MIGRATION_2_3.migrate(db)`
-  - `schedule_recurrence_rules`와 `schedule_recurrence_exceptions` 테이블 및 `scheduleId` index를 생성합니다.
-
-- `create(context)`
-  - `on_my_plate_native.db` Room database를 생성하고 migration을 연결합니다.
-
-- `SupportSQLiteDatabase.hasColumn(tableName, columnName)`
-  - `PRAGMA table_info`로 특정 테이블에 컬럼이 존재하는지 확인합니다.
-
-### `data/dao/AppointmentCandidateDao.kt`
-
-- `get(id)`
-  - 후보 ID로 후보 1건을 조회합니다.
-
-- `observe(id)`
-  - 후보 ID로 후보 1건을 `Flow`로 관찰합니다.
-
-- `observePending()`
-  - `pending` 상태 후보 목록을 최신 생성 순으로 관찰합니다.
-
-- `insert(candidate)`
-  - 후보를 삽입합니다. 같은 primary key가 있으면 abort합니다.
-
-- `update(candidate)`
-  - 후보의 파싱/수정/상태 값을 갱신합니다.
-
-### `data/dao/ScheduleDao.kt`
-
-- `observeAll()`
-  - 모든 저장 일정을 시작 시각 오름차순 `Flow`로 제공합니다.
-
-- `observe(id)`
-  - 저장 일정 ID로 일정 1건을 `Flow`로 관찰합니다.
-
-- `getAll()`
-  - 모든 저장 일정을 시작 시각 오름차순으로 한 번 조회합니다.
-
-- `get(id)`
-  - 저장 일정 ID로 일정 1건을 suspend 조회합니다.
-
-- `findConflicts(newStart, newEnd)`
-  - SQL 구간 겹침 조건으로 새 일정과 충돌하는 기존 일정을 조회합니다.
-  - 종료 시각이 없는 기존 일정은 SQL에서 기본 1시간을 적용합니다.
-
-- `insert(schedule)`
-  - 최종 일정을 삽입합니다. 같은 primary key가 있으면 abort합니다.
-
-- `update(schedule)`
-  - 저장된 일정 정보를 갱신합니다.
-
-### `data/dao/ScheduleRecurrenceDao.kt`
-
-- `observeRules()` / `observeExceptions()`
-  - 반복 규칙과 반복 예외 목록을 `Flow`로 관찰합니다.
-
-- `getRule(scheduleId)` / `getRules()` / `getExceptions()`
-  - 저장 일정의 반복 규칙 1건, 전체 반복 규칙, 전체 반복 예외를 suspend 조회합니다.
-
-- `upsertRule(rule)` / `deleteRule(scheduleId)`
-  - 저장 일정의 반복 규칙을 저장하거나 삭제합니다.
-
-- `upsertException(exception)`
-  - 특정 반복 occurrence의 예외를 저장합니다.
+- `ScheduleRecurrenceRuleEntity` / `ScheduleRecurrenceExceptionEntity`
+  - Room annotation 없이 반복 규칙과 skip 예외 API 응답을 표현하는 모델입니다.
 
 ---
 
@@ -233,8 +173,8 @@
 - `hasSession()` / `sessionToken()`
   - SharedPreferences에 저장된 앱 세션 토큰 존재 여부와 값을 반환합니다.
 
-- `isGuestMode()` / `hasAppAccess()`
-  - 로컬 게스트 모드 여부와 앱 진입 가능 여부를 반환합니다.
+- `hasAppAccess()`
+  - 저장된 세션 토큰이 있을 때만 앱 진입 가능 상태를 반환합니다.
 
 - `login(identifier, password)` / `signUp(identifier, password)`
   - `planner-api` Edge Function의 `/api/auth/login` 또는 `/api/auth/signup`에 id/password를 보내고, 응답 세션 토큰을 SharedPreferences에 저장합니다. 로그인은 서버에 사용자가 없으면 새 `planner_users` row를 만들고, 있으면 저장된 비밀번호 해시와 비교합니다.
@@ -243,11 +183,8 @@
   - 저장된 세션 토큰을 `Authorization` 헤더로 보내 `/api/auth/password`에 현재 비밀번호와 새 비밀번호를 제출합니다.
   - 인증 API 설정과 로그인 세션이 없으면 오류를 반환하고, 성공 시 기존 세션은 유지합니다.
 
-- `enterGuestMode()`
-  - 백엔드 계정 없이 앱을 열 수 있도록 로컬 게스트 모드 flag를 저장합니다.
-
 - `clearSession()` / `clearAccess()`
-  - 저장된 세션 토큰 또는 세션/게스트 접근 상태를 삭제합니다.
+  - 저장된 세션 토큰을 삭제합니다.
 
 ### `data/supabase/SharingRepository.kt`
 
@@ -274,9 +211,7 @@
   - Calls `GET /api/planner/share/groups` and returns groups accessible to the current logged-in user.
 
 - `uploadSchedule(groupId, schedule, recurrenceRule, recurrenceExceptions)`
-  - Converts one selected Room schedule plus recurrence rule/exceptions to the API contract's camelCase JSON and uploads it with `POST /api/planner/share/groups/{groupId}/schedules`.
-
-- `uploadPersonalSchedule(schedule, recurrenceRule, recurrenceExceptions)`
+  - Converts one selected Supabase personal schedule plus recurrence rule/exceptions to the API contract's camelCase JSON and uploads it with `POST /api/planner/share/groups/{groupId}/schedules`.
 ### `data/supabase/FeedbackRepository.kt`
 
 - `FeedbackRepository(context)`
@@ -359,14 +294,6 @@
 - `discardCandidate(candidateId)`
   - 후보가 존재하고 아직 `pending`이면 `discarded`로 표시합니다.
 
-- `insertSchedule(candidate, selectedStatus, titleOverride, forceStartAt)`
-  - 최종 `ScheduleEntity`를 생성해 `schedules` 테이블에 삽입하는 private helper입니다.
-  - 시작 시각은 `forceStartAt`, 후보의 시작 시각, 현재 시각 순으로 선택합니다.
-  - 후보 시작 시각이 없거나 선택 상태가 `Uncertain`이면 일정 상태를 `uncertain`으로 강제합니다.
-
-- `saveRecurrence(schedule, recurrenceInput)`
-  - 반복 없음이면 해당 일정의 반복 규칙을 삭제하고, 일간/주간/월간 반복이면 frequency, interval, 기준 요일/일자, 반복 종료/횟수 조건을 저장합니다.
-
 - `expandScheduleOccurrences(savedSchedules, rules, exceptions, rangeStart, rangeEnd)`
   - 단일 일정은 범위 안에 있을 때 occurrence로 포함하고, 반복 일정은 `expandRecurringSchedule` 결과로 대체합니다.
 
@@ -391,6 +318,7 @@
 
 - `showCandidate(candidate)`
   - 알림 권한이 있으면 후보 알림을 표시합니다.
+  - 후보 알림을 실제로 게시하면 `true`, 권한/앱 알림/채널 알림 차단으로 표시할 수 없으면 `false`를 반환합니다.
   - 파싱된 시간/장소를 보여주고, inline `RemoteInput`으로 제목을 입력해 저장할 수 있는 액션을 제공합니다.
   - 편집 화면으로 이동하는 액션도 제공합니다.
 
@@ -425,11 +353,11 @@
 - `formatRange(startAt, endAt)`
   - 알림에 표시할 일정 구간 문자열을 만듭니다. 종료 시각이 없으면 기본 1시간을 적용합니다.
 
-- `canNotify()`
-  - Android 13 미만이거나 알림 권한이 허용되어 있는지 확인합니다.
+- `canNotify(channelId)`
+  - Android 13 런타임 알림 권한, 앱 전체 알림 허용 상태, 지정 알림 채널 차단 여부를 확인합니다.
 
-- `pendingFlags()`
-  - immutable/update-current PendingIntent flag 조합을 반환합니다.
+- `immutablePendingFlags()` / `mutablePendingFlags()`
+  - 일반 deep link/action에는 immutable pending intent를 쓰고, inline `RemoteInput` 저장 action에는 mutable pending intent를 사용합니다.
 
 - `conflictNotificationId(candidateId)`
   - 후보 ID 기반으로 충돌 알림 ID를 생성합니다.
@@ -476,24 +404,27 @@
   - 개발자 트리거 업데이트가 진행 중이면 update flow를 다시 시작합니다.
 
 - `startRoute(intent)`
+  - 바구니 route extra가 있으면 바구니 화면으로 이동하고, 후보/충돌 extra가 있으면 해당 상세 화면으로 이동합니다.
   - intent extra를 읽어 기본 일정 화면, 후보 편집, 충돌 해결 route 중 하나로 변환합니다.
 
 - `candidateIntent(context, candidateId)`
   - 후보 편집 화면으로 이동하는 deep link intent를 생성합니다.
 
+- `basketIntent(context)`
+  - 공유 저장 실패나 바구니 직접 진입에 사용할 바구니 route intent를 생성합니다.
+
 - `conflictIntent(context, candidateId)`
   - 충돌 해결 화면으로 이동하는 deep link intent를 생성합니다.
 
 - `AppRoot(route, onRoute)`
-  - 공유 탭 아이콘 옆에 `준비중` 배지를 표시합니다.
-  - 공유 탭 아이콘 옆에 `준비중` 배지를 표시합니다.
-  - 현재 route에 따라 로그인, 주간 일정, 후보 바구니, 공유, 설정, 일정 편집, 후보 편집, 충돌 해결, 추가 완료 화면 중 하나를 표시합니다.
+  - 하단 탭은 `일정`, `바구니`, `설정`만 표시해 MVP 화면 표면을 주간 일정 확인, 후보 정리, 설정으로 제한합니다.
+  - 현재 route에 따라 로그인, 주간 일정, 후보 바구니, 공유, 설정, 일정 편집, 후보 편집, 충돌 해결, 추가 완료 화면 중 하나를 표시합니다. 공유 화면 route와 구현은 유지하지만 하단 탭에서는 노출하지 않습니다.
   - 메인 탭 route는 `MascotScaffold`로 감싸고, 후보 저장 완료 후에는 `Route.Complete(candidateId)`로 이동합니다.
 
 ### `ui/LoginScreen.kt`
 
 - `LoginScreen(authRepository, onAuthenticated)`
-  - 저장된 세션 토큰이나 게스트 모드 flag가 없을 때 로그인/가입/게스트 진입 화면을 표시합니다.
+  - 저장된 세션 토큰이 없을 때 로그인/가입 화면을 표시합니다.
   - id와 password를 받아 `AuthRepository.login` 또는 `AuthRepository.signUp`을 호출합니다.
   - 가입 모드에서는 비밀번호 확인을 검증하고, 성공하면 메인 일정 화면으로 이동합니다.
   - API 미설정, 인증 실패, 입력 검증 오류를 한국어 메시지로 표시합니다.
@@ -537,8 +468,8 @@
 ### `ui/PlannerScreen.kt`
 
 - `BasketScreen(repository, onOpenCandidate)`
-  - `observePendingCandidates()`를 구독해 아직 처리되지 않아 확인이 필요한 애매한 일정을 표시합니다.
-  - 화면 제목을 `약속 바구니`로 표시하고, 상단 문구는 체크할 약속 수를 안내합니다.
+  - `observePendingCandidates()`를 구독해 아직 처리되지 않아 정리가 필요한 약속 후보를 표시합니다.
+  - 화면 제목을 `약속 바구니`로 표시하고, 상단 문구는 확인할 후보 수를 안내합니다.
   - 사용자가 약속 메시지를 직접 입력하면 `createCandidate`로 후보를 만들고 후보 상세 화면으로 이동합니다.
   - 후보 목록은 `CandidateBasketCard`로 표시하며, 제목/시간/장소와 확인 필요 상태를 보여줍니다.
   - pending 후보가 없으면 체크할 애매한 일정이 없다는 안내 카드를 표시합니다.
@@ -565,17 +496,15 @@
 
 ### `ui/SharingScreen.kt`
 
-- In the current MVP UI, the sharing tab is shown as a coming-soon block screen instead of exposing the full sharing workflow.
-
 - `SharingScreen(plannerRepository, sharingRepository, onBack)`
   - Loads or creates the current user's sharing ID through the external share API, and creates groups with a partner sharing ID.
-  - Displays local Room schedules and uploads only the schedule selected by the user with its recurrence rule/exceptions.
+  - Displays the signed-in user's personal Supabase schedules and uploads only the schedule selected by the user with its recurrence rule/exceptions.
   - Displays real shared schedules for the selected group, optionally including dummy schedules returned by the API.
   - Shows a setup/login error when the share API base URL or existing app session token is missing.
   - Provides a checkbox for including dummy schedules.
 
 - `LocalShareRow(schedule, enabled, onUpload)`
-  - Renders one local Room schedule with a share button.
+  - Renders one personal schedule with a share button.
 
 - `SharedScheduleRow(schedule)`
   - Renders one schedule returned by the share API. If `isDummy=true`, it shows the shared-only chip; if recurrence exists, it shows the recurring chip.
@@ -614,11 +543,11 @@
 ### `ui/SettingsScreen.kt`
 
 - `SettingsScreen(authRepository, sharingRepository, feedbackRepository, onLoggedOut)`
-  - 계정 관리 카드에서 세션/게스트 모드 여부, 캐시된 공유 ID, 로그인 상태, 비밀번호 변경 폼, 로그아웃 동작을 표시합니다.
+  - 계정 관리 카드에서 세션 여부, 캐시된 공유 ID, 로그인 상태, 비밀번호 변경 폼, 로그아웃 동작을 표시합니다.
   - 피드백 남기기 카드에서 사용자가 남긴 문장을 `POST /api/planner/feedback`로 전송하고, 앱 버전과 설정 화면 출처를 함께 저장합니다.
-  - 세션/게스트 모드 여부, 캐시된 공유 ID, 공유 API 설정 상태, 앱 버전을 표시합니다.
+  - 세션 여부, 캐시된 공유 ID, 공유 API 설정 상태, 앱 버전을 표시합니다.
   - 계정 관리 섹션에서 로그인 세션과 인증 API가 있으면 비밀번호 변경 폼을 펼쳐 현재 비밀번호 확인, 새 비밀번호, 새 비밀번호 확인 입력으로 비밀번호를 변경하고 성공 메시지를 표시합니다.
-  - 로그아웃 시 저장된 세션 토큰, 게스트 모드 flag, 공유 ID 캐시를 삭제하고 로그인 화면으로 이동합니다.
+  - 로그아웃 시 저장된 세션 토큰, 공유 ID 캐시, 위젯 snapshot을 삭제하고 로그인 화면으로 이동합니다.
 
 - `SettingsCard(title, content)`
   - 설정 화면의 카드형 섹션을 렌더링합니다.
@@ -660,16 +589,15 @@
 ### `widget/PlannerWidgetSync.kt`
 
 - `syncFromPlannerDatabase(context)`
-  - 앱 context가 `OnMyPlateApp`이면 기존 database를 사용하고, 아니면 새 `AppDatabase`를 엽니다.
-  - 현재 주 범위의 단일/반복 occurrence를 조회합니다.
+  - 앱 context가 `OnMyPlateApp`이고 로그인 세션이 있으면 Supabase 개인 일정 API에서 현재 주 범위의 단일/반복 occurrence를 조회합니다.
+  - 세션이 없거나 API 조회에 실패하면 빈 snapshot을 저장합니다.
   - 조회 결과로 `saveSnapshot`을 호출합니다.
-  - 임시로 연 DB는 작업 후 닫습니다.
 
 - `saveSnapshot(context, schedules)`
   - occurrence를 시작 시각 기준으로 정렬합니다.
   - `Asia/Seoul` 날짜별로 `manualEventsByDate` JSON을 구성합니다.
   - 각 occurrence는 title, startMinute, endMinute, source=`manual`, isRecurring 값을 저장합니다.
-  - 현재 주 월요일, viewport 기본값, schema, generatedAt을 포함한 snapshot JSON을 SharedPreferences에 저장합니다.
+  - 현재 주 월요일, viewport 기본값, `native-supabase-schedules-v1` schema, generatedAt을 포함한 snapshot JSON을 SharedPreferences에 저장합니다.
 
 ### `widget/PlannerWidgetStore.java`
 
@@ -677,7 +605,7 @@
   - 위젯 snapshot 저장에 쓰는 SharedPreferences를 반환합니다.
 
 - `saveSummarySnapshot(context, snapshotJson)`
-  - `summary_snapshot` key에 snapshot JSON을 저장합니다.
+  - `summary_snapshot` key에 snapshot JSON을 동기적으로 저장합니다.
   - 저장 직후 `SummaryWidgetProvider.refreshAll`로 모든 위젯을 갱신합니다.
 
 ### `widget/SummaryWidgetProvider.java`
@@ -814,6 +742,17 @@
   - 그룹 멤버 권한을 확인한 뒤 공유 일정과 반복 규칙/예외 업로드 및 조회를 처리합니다.
 
 - `uploadPersonalSchedule(userId, request)`
+  - 로그인 사용자의 개인 일정 row를 생성/upsert하고 반복 규칙/예외를 개인 일정 반복 테이블에 저장한 뒤 schedule JSON을 반환합니다.
+
+- `listPersonalSchedules(userId)` / `getPersonalSchedule(userId, scheduleId)` / `updatePersonalSchedule(userId, scheduleId, request)`
+  - 로그인 사용자가 소유한 개인 일정 목록/단건 조회와 PATCH 수정을 처리하고 반복 metadata를 응답에 포함합니다.
+
+- `addPersonalScheduleRecurrenceException(userId, scheduleId, request)`
+  - 로그인 사용자가 소유한 반복 일정 occurrence skip 예외를 저장합니다.
+
+- `createCandidate(userId, request)` / `listCandidates(userId, status)` / `getCandidate(userId, candidateId)` / `updateCandidate(userId, candidateId, request)` / `discardCandidate(userId, candidateId)`
+  - `planner_candidates`에 현재 사용자 후보를 생성, pending 목록 조회, 단건 조회, 편집/상태 변경, discard 처리합니다.
+
 - `submitFeedback(request)`
   - 세션 토큰이 있으면 사용자 ID를 함께 저장하고, 없으면 익명으로 `planner_feedback` row를 추가합니다.
   - 피드백 문장, 앱 버전, 설정 출처를 검증한 뒤 Supabase DB에 저장하고 `{ ok: true }`를 반환합니다.

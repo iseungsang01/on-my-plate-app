@@ -61,11 +61,10 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
 
     val loginState = when {
-        authRepository.isGuestMode() -> "게스트 모드"
         sessionPresent -> "세션 있음"
         else -> "로그인 필요"
     }
-    val canChangePassword = sessionPresent && !authRepository.isGuestMode() && authRepository.isConfigured() && !changingPassword
+    val canChangePassword = sessionPresent && authRepository.isConfigured() && !changingPassword
     val canSendFeedback = feedbackRepository.isConfigured() && !sendingFeedback
 
     Column(
@@ -80,7 +79,7 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("설정과 계정", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("로그인, 게스트 모드, 피드백, 앱 정보를 관리합니다.", color = FeedLoopColors.Secondary)
+        Text("로그인, 피드백, 앱 정보를 관리합니다.", color = FeedLoopColors.Secondary)
 
         SettingsCard(title = "계정 관리") {
             SettingLine("내 공유 ID", publicId.ifBlank { "생성 전" })
@@ -169,7 +168,7 @@ fun SettingsScreen(
                     sharingRepository.clearAccountCache()
                     sessionPresent = false
                     publicId = ""
-                    message = "저장된 세션과 게스트 상태를 모두 삭제했습니다."
+                    message = "저장된 세션을 삭제했습니다."
                     onLoggedOut()
                 },
                 modifier = Modifier.fillMaxWidth(),

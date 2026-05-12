@@ -1,11 +1,7 @@
 package com.lss.onmyplate.nativeplanner.data.entity
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
-
-@Entity(tableName = "schedules")
 data class ScheduleEntity(
-    @PrimaryKey val id: String,
+    val id: String,
     val title: String,
     val startAt: Long,
     val endAt: Long?,

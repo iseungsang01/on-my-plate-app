@@ -2,10 +2,7 @@ package com.lss.onmyplate.nativeplanner.widget
 
 import android.content.Context
 import com.lss.onmyplate.nativeplanner.OnMyPlateApp
-import com.lss.onmyplate.nativeplanner.data.db.AppDatabase
-import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.repository.ScheduleOccurrence
-import com.lss.onmyplate.nativeplanner.domain.parser.KoreanAppointmentParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,23 +21,28 @@ object PlannerWidgetSync {
     fun syncFromPlannerDatabase(context: Context) {
         val appContext = context.applicationContext
         syncScope.launch {
-            val appDatabase = (appContext as? OnMyPlateApp)?.database
-            val db = appDatabase ?: AppDatabase.create(appContext)
-            try {
+            val app = appContext as? OnMyPlateApp
+            if (app == null || !app.authRepository.hasSession()) {
+                clearSnapshot(appContext)
+                return@launch
+            }
+            runCatching {
                 val monday = LocalDate.now(zoneId).with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
                 val rangeStart = monday.atStartOfDay(zoneId).toInstant().toEpochMilli()
                 val rangeEnd = monday.plusDays(7).atStartOfDay(zoneId).toInstant().toEpochMilli()
-                saveSnapshot(appContext, PlannerRepository(db, KoreanAppointmentParser()).getExpandedSchedules(rangeStart, rangeEnd))
-            } finally {
-                if (appDatabase == null) {
-                    db.close()
-                }
+                saveSnapshot(appContext, app.repository.getExpandedSchedules(rangeStart, rangeEnd))
+            }.onFailure {
+                clearSnapshot(appContext)
             }
         }
     }
 
+    fun clearSnapshot(context: Context) {
+        saveSnapshot(context, emptyList())
+    }
+
     fun saveSnapshot(context: Context, schedules: List<ScheduleOccurrence>) {
-        // Native MVP scope: the Android app only owns Room-backed schedules.
+        // Native MVP scope: the Android app exports the signed-in user's personal schedules.
         // The reusable widget bundle under widget/ can additionally provide auto/category plans,
         // but this native snapshot intentionally exports manualEventsByDate only.
         val manualEventsByDate = JSONObject()
@@ -64,7 +66,7 @@ object PlannerWidgetSync {
 
         val monday = LocalDate.now(zoneId).with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
         val snapshot = JSONObject()
-            .put("schema", "native-room-schedules-v1")
+            .put("schema", "native-supabase-schedules-v1")
             .put("generatedAt", Instant.now().toString())
             .put("weekStart", monday.toString())
             .put("viewportStartMinute", 8 * 60)

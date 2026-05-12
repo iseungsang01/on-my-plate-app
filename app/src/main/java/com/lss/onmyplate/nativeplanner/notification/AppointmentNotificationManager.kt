@@ -40,13 +40,13 @@ class AppointmentNotificationManager(private val context: Context) {
         }
     }
 
-    fun showCandidate(candidate: AppointmentCandidateEntity) {
-        if (!canNotify()) return
+    fun showCandidate(candidate: AppointmentCandidateEntity): Boolean {
+        if (!canNotify(CHANNEL_APPOINTMENTS)) return false
         val contentIntent = PendingIntent.getActivity(
             context,
             candidate.id.hashCode(),
             MainActivity.candidateIntent(context, candidate.id),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            immutablePendingFlags(),
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_APPOINTMENTS)
             .setSmallIcon(R.drawable.ic_stat_calendar)
@@ -54,23 +54,28 @@ class AppointmentNotificationManager(private val context: Context) {
             .setContentText(candidateSummary(candidate))
             .setStyle(NotificationCompat.BigTextStyle().bigText(candidateDetails(candidate)))
             .setContentIntent(contentIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
             .addAction(saveAction(candidate.id, ScheduleStatus.Confirmed, "확정 저장"))
             .addAction(saveAction(candidate.id, ScheduleStatus.Uncertain, "미정 저장"))
-            .addAction(editAction(candidate.id, "세부 수정"))
+            .addAction(editAction(candidate.id, "앱에서 수정"))
             .build()
 
         notificationManager.notify(candidate.id.hashCode(), notification)
+        return true
     }
 
     fun showConflict(candidate: AppointmentCandidateEntity, existing: ScheduleEntity) {
-        if (!canNotify()) return
+        if (!canNotify(CHANNEL_CONFLICTS)) return
         val editIntent = MainActivity.conflictIntent(context, candidate.id)
         val notification = NotificationCompat.Builder(context, CHANNEL_CONFLICTS)
             .setSmallIcon(R.drawable.ic_stat_calendar)
             .setContentTitle("일정이 겹칩니다")
             .setContentText("${existing.title} ${formatRange(existing.startAt, existing.endAt)}")
-            .setContentIntent(PendingIntent.getActivity(context, candidate.id.hashCode(), editIntent, pendingFlags()))
+            .setContentIntent(PendingIntent.getActivity(context, candidate.id.hashCode(), editIntent, immutablePendingFlags()))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
             .addAction(conflictAction(candidate.id, ACTION_FORCE_ADD, "그래도 추가"))
             .addAction(conflictActivityAction(candidate.id, "수정하기"))
@@ -98,7 +103,7 @@ class AppointmentNotificationManager(private val context: Context) {
             putExtra(EXTRA_CANDIDATE_ID, candidateId)
             putExtra(EXTRA_STATUS, status.dbValue)
         }
-        val pendingIntent = PendingIntent.getBroadcast(context, (candidateId + status.dbValue).hashCode(), intent, pendingFlags())
+        val pendingIntent = PendingIntent.getBroadcast(context, (candidateId + status.dbValue).hashCode(), intent, mutablePendingFlags())
         val builder = NotificationCompat.Action.Builder(R.drawable.ic_stat_calendar, label, pendingIntent)
         val remoteInput = RemoteInput.Builder(KEY_REMOTE_TITLE)
             .setLabel("약속 제목")
@@ -113,7 +118,7 @@ class AppointmentNotificationManager(private val context: Context) {
             context,
             (candidateId + label).hashCode(),
             MainActivity.candidateIntent(context, candidateId),
-            pendingFlags(),
+            immutablePendingFlags(),
         )
         return NotificationCompat.Action.Builder(R.drawable.ic_stat_calendar, label, pendingIntent).build()
     }
@@ -126,7 +131,7 @@ class AppointmentNotificationManager(private val context: Context) {
         return NotificationCompat.Action.Builder(
             R.drawable.ic_stat_calendar,
             label,
-            PendingIntent.getBroadcast(context, (candidateId + actionName).hashCode(), intent, pendingFlags()),
+            PendingIntent.getBroadcast(context, (candidateId + actionName).hashCode(), intent, immutablePendingFlags()),
         ).build()
     }
 
@@ -134,7 +139,7 @@ class AppointmentNotificationManager(private val context: Context) {
         NotificationCompat.Action.Builder(
             R.drawable.ic_stat_calendar,
             label,
-            PendingIntent.getActivity(context, (candidateId + label).hashCode(), MainActivity.conflictIntent(context, candidateId), pendingFlags()),
+            PendingIntent.getActivity(context, (candidateId + label).hashCode(), MainActivity.conflictIntent(context, candidateId), immutablePendingFlags()),
         ).build()
 
     private fun candidateSummary(candidate: AppointmentCandidateEntity): String {
@@ -145,7 +150,7 @@ class AppointmentNotificationManager(private val context: Context) {
 
     private fun candidateDetails(candidate: AppointmentCandidateEntity): String {
         val source = candidate.sourceApp?.let { "\n공유 앱: $it" }.orEmpty()
-        return "${candidateSummary(candidate)}\n제목은 직접 입력합니다$source"
+        return "${candidateSummary(candidate)}\n제목을 직접 입력합니다.$source"
     }
 
     private fun formatRange(startAt: Long, endAt: Long?): String {
@@ -153,11 +158,22 @@ class AppointmentNotificationManager(private val context: Context) {
         return "${formatter.format(Instant.ofEpochMilli(startAt))}-${formatter.format(Instant.ofEpochMilli(effectiveEnd))}"
     }
 
-    private fun canNotify(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+    fun canNotify(channelId: String = CHANNEL_APPOINTMENTS): Boolean {
+        val hasRuntimePermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (!hasRuntimePermission || !notificationManager.areNotificationsEnabled()) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            return manager.getNotificationChannel(channelId)?.importance != NotificationManager.IMPORTANCE_NONE
+        }
+        return true
+    }
 
-    private fun pendingFlags() = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    private fun immutablePendingFlags() = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+
+    private fun mutablePendingFlags(): Int =
+        PendingIntent.FLAG_UPDATE_CURRENT or
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
 
     private fun conflictNotificationId(candidateId: String) = candidateId.hashCode().absoluteValue + 100_000
 

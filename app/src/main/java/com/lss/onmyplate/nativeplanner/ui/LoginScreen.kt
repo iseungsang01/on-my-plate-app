@@ -15,7 +15,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -144,16 +143,6 @@ fun LoginScreen(authRepository: AuthRepository, onAuthenticated: () -> Unit) {
                     colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
                 ) {
                     Text(if (loading) "처리 중..." else if (isSignUp) "회원가입" else "로그인")
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        authRepository.enterGuestMode()
-                        onAuthenticated()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("게스트로 시작")
                 }
 
                 TextButton(

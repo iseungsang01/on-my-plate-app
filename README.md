@@ -21,7 +21,7 @@ The app turns shared text into a schedule candidate, but it does not decide the 
    - open the app to edit title, time, end time, and location before saving
 7. `PlannerRepository.saveFromCandidate` refuses to create a schedule if the title is still blank.
 8. If the candidate overlaps an existing schedule, the app shows a conflict notification/screen before saving unless the user explicitly forces the add.
-9. Saved schedules are stored locally in Room and synced into the native home-screen widget snapshot.
+9. Saved schedules are stored through the Supabase `planner-api` for the signed-in account and synced into the native home-screen widget snapshot.
 
 See `docs/SPECIFICATION.md` for the file-level implementation map.
 
@@ -47,20 +47,20 @@ The app registers an Android `ACTION_SEND` target for `text/plain`. Share text f
 
 ## MVP Scope
 
-- Native Android Kotlin, Jetpack Compose, Room, coroutines.
+- Native Android Kotlin, Jetpack Compose, coroutines, and Supabase Edge Function-backed planner data.
 - Korean rule-based parser plus optional Gemini LLM parsing for shared text metadata.
 - Appointment title is user-entered text, not parsed from the shared text.
 - Notification actions with `RemoteInput`: `확정 저장`, `미정 저장`, `세부 수정`.
-- Local conflict detection using Room schedules.
+- Conflict detection using the signed-in user's Supabase-backed personal schedules.
 - Candidate edit and conflict resolution screens.
 
-No KakaoTalk scraping, login, background chat monitoring, web app, or cloud sync is included.
+No KakaoTalk scraping, background chat monitoring, or web app is included. Login is required for schedule features.
 
 ## Native widget snapshot scope
 
-The native Android widget is part of this MVP and renders only Room-backed schedules saved by the native planner.
+The native Android widget is part of this MVP and renders the signed-in user's personal schedules fetched through `planner-api`.
 
-- `PlannerWidgetSync` writes a `native-room-schedules-v1` summary snapshot.
+- `PlannerWidgetSync` writes a `native-supabase-schedules-v1` summary snapshot.
 - The snapshot includes `manualEventsByDate` grouped by local date in `Asia/Seoul`.
 - It intentionally does not write `autoPlans`, category columns, or generated `days`; the native widget derives the visible week from `manualEventsByDate`.
 - The reusable `widget/` bundle has a wider snapshot model for host apps that already have manual daily schedules plus auto/category plans. See `widget/README.md` for that contract.
@@ -77,6 +77,6 @@ The native Android widget is part of this MVP and renders only Room-backed sched
 
 ## Supabase Edge Function planner API
 
-The Android app uses a single Supabase Edge Function, `planner-api`, for app login, schedule sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` (or CI env) as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` uses the app's own `planner_users` rows, creates a user row on first login, stores only a user-id salted password hash, returns the user id as the app session token, and then writes to Supabase with server-only service-role credentials.
+The Android app uses a single Supabase Edge Function, `planner-api`, for app login, candidate storage, personal schedules, widget sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` (or CI env) as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` uses the app's own `planner_users` rows, creates a user row on first login, stores only a user-id salted password hash, returns the user id as the app session token, and then writes to Supabase with server-only service-role credentials.
 
-The Android app never stores service-role credentials and no longer depends on any PC-local backend. Shared-screen-only fake entries live in `planner_dummy_schedules` and are never copied into Room or the home widget. See `docs/supabaseSQL.md` for the server-side schema and RLS posture.
+The Android app never stores service-role credentials, does not read the old `on_my_plate_native.db` Room database, and no longer depends on any PC-local backend. Shared-screen-only fake entries live in `planner_dummy_schedules` and are never copied into personal schedules or the home widget. See `docs/supabaseSQL.md` for the server-side schema and RLS posture.

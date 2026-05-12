@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult
@@ -33,14 +34,17 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.lss.onmyplate.nativeplanner.BuildConfig
 import com.lss.onmyplate.nativeplanner.OnMyPlateApp
 import com.lss.onmyplate.nativeplanner.R
+import com.lss.onmyplate.nativeplanner.widget.PlannerWidgetSync
 import com.google.android.play.core.appupdate.AppUpdateManager
 import com.google.android.play.core.appupdate.AppUpdateManagerFactory
 import com.google.android.play.core.appupdate.AppUpdateOptions
 import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.UpdateAvailability
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -52,9 +56,11 @@ class MainActivity : ComponentActivity() {
     }
     private var routeState = mutableStateOf<Route>(Route.Schedule)
     private var pendingAfterLogin: Route = Route.Schedule
+    private var pendingExternalShare: PendingExternalShare? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingExternalShare = externalShareFrom(intent)
         pendingAfterLogin = startRoute(intent)
         routeState.value = if (hasAppAccess()) pendingAfterLogin else Route.Login
         setContent {
@@ -64,10 +70,12 @@ class MainActivity : ComponentActivity() {
                     AppRoot(
                         route = route,
                         onRoute = { routeState.value = it },
+                        onAuthenticated = { onAuthenticated() },
                     )
                 }
             }
         }
+        if (hasAppAccess()) processPendingExternalShare()
         maybeRequestNotifications()
         checkForAppUpdate()
     }
@@ -79,8 +87,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        pendingExternalShare = externalShareFrom(intent)
         pendingAfterLogin = startRoute(intent)
         routeState.value = if (hasAppAccess()) pendingAfterLogin else Route.Login
+        if (hasAppAccess()) processPendingExternalShare()
     }
 
     private fun maybeRequestNotifications() {
@@ -127,18 +137,64 @@ class MainActivity : ComponentActivity() {
 
     private fun hasAppAccess(): Boolean = (applicationContext as OnMyPlateApp).authRepository.hasAppAccess()
 
+    private fun onAuthenticated() {
+        routeState.value = pendingAfterLogin
+        processPendingExternalShare()
+    }
+
+    private fun processPendingExternalShare() {
+        val share = pendingExternalShare ?: return
+        if (!hasAppAccess()) return
+        pendingExternalShare = null
+        routeState.value = Route.Basket
+        lifecycleScope.launch {
+            val app = applicationContext as OnMyPlateApp
+            try {
+                val candidate = app.repository.createCandidate(share.text, share.sourceApp, share.receivedAt)
+                val notificationShown = app.notifications.showCandidate(candidate)
+                if (!notificationShown) {
+                    routeState.value = Route.Candidate(candidate.id)
+                }
+            } catch (error: Throwable) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "약속 정보를 저장하지 못했습니다. 로그인 또는 네트워크를 확인해 주세요.",
+                    Toast.LENGTH_LONG,
+                ).show()
+                routeState.value = Route.Basket
+            }
+        }
+    }
+
     private fun startRoute(intent: Intent): Route {
         val candidateId = intent.getStringExtra(EXTRA_CANDIDATE_ID)
         return when {
             candidateId != null && intent.getBooleanExtra(EXTRA_CONFLICT, false) -> Route.Conflict(candidateId)
             candidateId != null -> Route.Candidate(candidateId)
+            intent.getStringExtra(EXTRA_ROUTE) == ROUTE_BASKET -> Route.Basket
             else -> Route.Schedule
         }
+    }
+
+    private fun externalShareFrom(intent: Intent): PendingExternalShare? {
+        val text = intent.getStringExtra(EXTRA_SHARED_TEXT)
+            ?: if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") intent.getStringExtra(Intent.EXTRA_TEXT) else null
+        val cleanText = text?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return PendingExternalShare(
+            text = cleanText,
+            sourceApp = intent.getStringExtra(EXTRA_SHARED_SOURCE_APP),
+            receivedAt = intent.getLongExtra(EXTRA_SHARED_RECEIVED_AT, System.currentTimeMillis()),
+        )
     }
 
     companion object {
         private const val EXTRA_CANDIDATE_ID = "candidate_id"
         private const val EXTRA_CONFLICT = "conflict"
+        private const val EXTRA_ROUTE = "route"
+        private const val ROUTE_BASKET = "basket"
+        private const val EXTRA_SHARED_TEXT = "shared_text"
+        private const val EXTRA_SHARED_SOURCE_APP = "shared_source_app"
+        private const val EXTRA_SHARED_RECEIVED_AT = "shared_received_at"
 
         fun candidateIntent(context: Context, candidateId: String): Intent =
             Intent(context, MainActivity::class.java).apply {
@@ -146,10 +202,31 @@ class MainActivity : ComponentActivity() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
 
+        fun basketIntent(context: Context): Intent =
+            Intent(context, MainActivity::class.java).apply {
+                putExtra(EXTRA_ROUTE, ROUTE_BASKET)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+
+        fun sharedTextIntent(context: Context, text: String, sourceApp: String?, receivedAt: Long): Intent =
+            Intent(context, MainActivity::class.java).apply {
+                putExtra(EXTRA_ROUTE, ROUTE_BASKET)
+                putExtra(EXTRA_SHARED_TEXT, text)
+                putExtra(EXTRA_SHARED_SOURCE_APP, sourceApp)
+                putExtra(EXTRA_SHARED_RECEIVED_AT, receivedAt)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+
         fun conflictIntent(context: Context, candidateId: String): Intent =
             candidateIntent(context, candidateId).apply { putExtra(EXTRA_CONFLICT, true) }
     }
 }
+
+private data class PendingExternalShare(
+    val text: String,
+    val sourceApp: String?,
+    val receivedAt: Long,
+)
 
 sealed interface Route {
     data object Schedule : Route
@@ -166,15 +243,14 @@ sealed interface Route {
 private enum class MainTab(val label: String, val route: Route, val imageRes: Int, val badgeText: String? = null) {
     Schedule("일정", Route.Schedule, R.drawable.mascot_note),
     Basket("바구니", Route.Basket, R.drawable.mascot_basket),
-    Sharing("공유", Route.Sharing, R.drawable.mascot_plane, badgeText = "준비중"),
     Settings("설정", Route.Settings, R.drawable.mascot_settings),
 }
 
 @Composable
-private fun AppRoot(route: Route, onRoute: (Route) -> Unit) {
+private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () -> Unit) {
     val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as OnMyPlateApp
     when (route) {
-        Route.Login -> LoginScreen(authRepository = app.authRepository, onAuthenticated = { onRoute(Route.Schedule) })
+        Route.Login -> LoginScreen(authRepository = app.authRepository, onAuthenticated = onAuthenticated)
         Route.Schedule -> MascotScaffold(selected = MainTab.Schedule, onRoute = onRoute) {
             WeeklyScheduleScreen(repository = app.repository, onOpenSchedule = { scheduleId, occurrenceStartAt ->
                 onRoute(Route.ScheduleEdit(scheduleId, occurrenceStartAt))
@@ -183,13 +259,11 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit) {
         Route.Basket -> MascotScaffold(selected = MainTab.Basket, onRoute = onRoute) {
             BasketScreen(repository = app.repository, onOpenCandidate = { onRoute(Route.Candidate(it)) })
         }
-        Route.Sharing -> MascotScaffold(selected = MainTab.Sharing, onRoute = onRoute) {
-            ComingSoonScreen(
-                title = "공유",
-                message = "공유 기능은 현재 MVP에서 미실행 예정입니다.\nUI는 업데이트 예정 상태로 보여드리고 있어요.",
-                onBack = { onRoute(Route.Schedule) },
-            )
-        }
+        Route.Sharing -> SharingScreen(
+            plannerRepository = app.repository,
+            sharingRepository = app.sharingRepository,
+            onBack = { onRoute(Route.Schedule) },
+        )
         Route.Settings -> MascotScaffold(selected = MainTab.Settings, onRoute = onRoute) {
             SettingsScreen(
                 authRepository = app.authRepository,
@@ -198,6 +272,7 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit) {
                 onLoggedOut = {
                     app.authRepository.clearAccess()
                     app.sharingRepository.clearAccountCache()
+                    PlannerWidgetSync.clearSnapshot(app)
                     onRoute(Route.Login)
                 },
             )

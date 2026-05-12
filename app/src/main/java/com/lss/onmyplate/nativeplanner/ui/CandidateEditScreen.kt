@@ -12,7 +12,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.lss.onmyplate.nativeplanner.OnMyPlateApp
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.repository.SaveResult
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
@@ -28,7 +27,6 @@ fun CandidateEditScreen(
 ) {
     val candidate by repository.observeCandidate(candidateId).collectAsState(initial = null)
     val scope = rememberCoroutineScope()
-    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as OnMyPlateApp
     var title by remember(candidate?.id) { mutableStateOf(candidate?.extractedTitle.orEmpty()) }
     var startAt by remember(candidate?.id) { mutableStateOf(candidate?.extractedStartAt) }
     var endAt by remember(candidate?.id) { mutableStateOf(candidate?.extractedEndAt) }
@@ -98,14 +96,8 @@ fun CandidateEditScreen(
                         repository.updateCandidate(candidateId, title, startAt, endAt, location)
                         when (val result = repository.saveFromCandidate(candidateId, status, title, recurrenceInput = recurrenceInput ?: return@launch)) {
                             is SaveResult.Conflict -> onConflict()
-                            is SaveResult.Saved -> {
-                                app.syncScheduleAsync(result.schedule)
-                                onDone()
-                            }
-                            is SaveResult.SavedAsUncertain -> {
-                                app.syncScheduleAsync(result.schedule)
-                                onDone()
-                            }
+                            is SaveResult.Saved -> onDone()
+                            is SaveResult.SavedAsUncertain -> onDone()
                             else -> onDone()
                         }
                     }

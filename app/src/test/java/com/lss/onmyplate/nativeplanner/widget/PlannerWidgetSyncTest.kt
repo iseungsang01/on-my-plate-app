@@ -46,16 +46,17 @@ class PlannerWidgetSyncTest {
                     .getString(PlannerWidgetStore.KEY_SUMMARY_SNAPSHOT, null),
             ),
         )
-        assertEquals("native-room-schedules-v1", snapshot.getString("schema"))
+        assertEquals("native-supabase-schedules-v1", snapshot.getString("schema"))
         assertTrue(snapshot.has("generatedAt"))
         assertTrue(snapshot.has("weekStart"))
         assertEquals(8 * 60, snapshot.getInt("viewportStartMinute"))
         assertEquals(24 * 60, snapshot.getInt("viewportEndMinute"))
         assertFalse(snapshot.has("autoPlans"))
 
+        val dateKey = java.time.Instant.ofEpochMilli(firstStart).atZone(zoneId).toLocalDate().toString()
         val items = snapshot
             .getJSONObject("manualEventsByDate")
-            .getJSONArray("2026-05-07")
+            .getJSONArray(dateKey)
         assertEquals(2, items.length())
         assertEquals("Earlier", items.getJSONObject(0).getString("title"))
         assertEquals(9 * 60 + 15, items.getJSONObject(0).getInt("startMinute"))

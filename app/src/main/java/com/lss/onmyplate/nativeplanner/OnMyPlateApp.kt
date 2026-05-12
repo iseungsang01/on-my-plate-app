@@ -3,8 +3,6 @@ package com.lss.onmyplate.nativeplanner
 import android.app.Application
 import com.lss.onmyplate.nativeplanner.BuildConfig
 import com.lss.onmyplate.nativeplanner.data.auth.AuthRepository
-import com.lss.onmyplate.nativeplanner.data.db.AppDatabase
-import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.supabase.FeedbackRepository
 import com.lss.onmyplate.nativeplanner.data.supabase.SharingRepository
@@ -22,7 +20,6 @@ import java.time.temporal.TemporalAdjusters
 
 class OnMyPlateApp : Application() {
     val appScope = CoroutineScope(SupervisorJob())
-    val database by lazy { AppDatabase.create(this) }
     val parser by lazy {
         KoreanAppointmentParser(
             llmParser = GeminiAppointmentParser(
@@ -33,30 +30,19 @@ class OnMyPlateApp : Application() {
             preferLlm = true,
         )
     }
-    val repository by lazy { PlannerRepository(database, parser) }
+    val repository by lazy { PlannerRepository(this, parser) }
     val authRepository by lazy { AuthRepository(this) }
     val feedbackRepository by lazy { FeedbackRepository(this) }
     val sharingRepository by lazy { SharingRepository(this) }
     val notifications by lazy { AppointmentNotificationManager(this) }
 
-    fun syncScheduleAsync(schedule: ScheduleEntity) {
-        appScope.launch {
-            runCatching {
-                if (sharingRepository.isConfigured() && sharingRepository.hasCachedSession()) {
-                    sharingRepository.uploadPersonalSchedule(
-                        schedule = schedule,
-                        recurrenceRule = repository.getRecurrenceRule(schedule.id),
-                        recurrenceExceptions = repository.getRecurrenceExceptions(schedule.id),
-                    )
-                }
-            }
-        }
-    }
-
     override fun onCreate() {
         super.onCreate()
         instance = this
         notifications.ensureChannels()
+        deleteDatabase("on_my_plate_native.db")
+        deleteDatabase("on_my_plate_native.db-shm")
+        deleteDatabase("on_my_plate_native.db-wal")
         appScope.launch {
             val zone = ZoneId.of("Asia/Seoul")
             val weekStart = LocalDate.now(zone).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))

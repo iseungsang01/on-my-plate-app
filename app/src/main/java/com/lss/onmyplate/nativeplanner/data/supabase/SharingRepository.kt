@@ -55,14 +55,6 @@ class SharingRepository(context: Context) {
         client.uploadSchedule(sessionToken(), groupId, schedule, recurrenceRule, recurrenceExceptions)
     }
 
-    suspend fun uploadPersonalSchedule(
-        schedule: ScheduleEntity,
-        recurrenceRule: ScheduleRecurrenceRuleEntity? = null,
-        recurrenceExceptions: List<ScheduleRecurrenceExceptionEntity> = emptyList(),
-    ): Unit = withContext(Dispatchers.IO) {
-        client.uploadPersonalSchedule(sessionToken(), schedule, recurrenceRule, recurrenceExceptions)
-    }
-
     suspend fun listSharedSchedules(groupId: String, includeDummy: Boolean): List<SharedSchedule> = withContext(Dispatchers.IO) {
         client.listSchedules(sessionToken(), groupId, includeDummy)
     }
@@ -140,15 +132,6 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
             token,
             schedule.toApiJson(recurrenceRule, recurrenceExceptions),
         )
-    }
-
-    fun uploadPersonalSchedule(
-        token: String,
-        schedule: ScheduleEntity,
-        recurrenceRule: ScheduleRecurrenceRuleEntity?,
-        recurrenceExceptions: List<ScheduleRecurrenceExceptionEntity>,
-    ) {
-        request("POST", "/api/planner/schedules", token, schedule.toApiJson(recurrenceRule, recurrenceExceptions))
     }
 
     fun listSchedules(token: String, groupId: String, includeDummy: Boolean): List<SharedSchedule> {
