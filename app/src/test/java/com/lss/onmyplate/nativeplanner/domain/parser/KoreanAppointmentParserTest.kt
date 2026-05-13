@@ -76,10 +76,52 @@ class KoreanAppointmentParserTest {
 
         val result = parser.parse("내일 저녁 7시 강남에서 약속", receivedAt)
 
-        assertEquals("", result.title)
+        assertEquals("LLM dinner", result.title)
         assertEquals(llmStartAt, result.startAt)
+        assertEquals(llmStartAt + 60 * 60 * 1_000L, result.endAt)
         assertEquals("LLM place", result.location)
         assertEquals(1.0f, result.confidence)
+    }
+
+    @Test
+    fun fillsDefaultTitleAndEndWhenLlmOmitsThem() = runBlocking {
+        val llmStartAt = epochMillis(2026, 5, 13, 16, 0)
+        val llmParser = AppointmentLlmParser { _, _ ->
+            AppointmentParseResult(
+                title = "",
+                startAt = llmStartAt,
+                endAt = null,
+                location = "Gangnam",
+                confidence = 0.9f,
+                timeConfidence = TimeConfidence.High,
+            )
+        }
+        val parser = KoreanAppointmentParser(zoneId = zoneId, llmParser = llmParser, preferLlm = true)
+
+        val result = parser.parse("appointment text", receivedAt)
+
+        assertEquals("5/13 1600-1700 Gangnam", result.title)
+        assertEquals(llmStartAt + 60 * 60 * 1_000L, result.endAt)
+    }
+
+    @Test
+    fun omitsLocationFromDefaultTitleWhenLocationIsMissing() = runBlocking {
+        val llmStartAt = epochMillis(2026, 5, 13, 16, 0)
+        val llmParser = AppointmentLlmParser { _, _ ->
+            AppointmentParseResult(
+                title = "",
+                startAt = llmStartAt,
+                endAt = epochMillis(2026, 5, 13, 18, 0),
+                location = null,
+                confidence = 0.9f,
+                timeConfidence = TimeConfidence.High,
+            )
+        }
+        val parser = KoreanAppointmentParser(zoneId = zoneId, llmParser = llmParser, preferLlm = true)
+
+        val result = parser.parse("appointment text", receivedAt)
+
+        assertEquals("5/13 1600-1800", result.title)
     }
 
     @Test

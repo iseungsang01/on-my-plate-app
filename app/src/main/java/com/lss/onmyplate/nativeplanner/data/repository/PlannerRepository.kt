@@ -1,6 +1,7 @@
 package com.lss.onmyplate.nativeplanner.data.repository
 
 import android.content.Context
+import android.util.Log
 import com.lss.onmyplate.nativeplanner.BuildConfig
 import com.lss.onmyplate.nativeplanner.data.entity.AppointmentCandidateEntity
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
@@ -80,7 +81,17 @@ class PlannerRepository(
         expandScheduleOccurrences(refreshSchedules(rangeStart, rangeEnd), rangeStart, rangeEnd)
 
     suspend fun createCandidate(rawText: String, sourceApp: String?, receivedAt: Long): AppointmentCandidateEntity {
-        val parsed = parser.parse(rawText, receivedAt)
+        Log.i(TAG, "createCandidate started. textLength=${rawText.length}, sourceApp=$sourceApp, apiConfigured=${client.isConfigured()}, hasSession=${hasCachedSession()}")
+        val parsed = try {
+            parser.parse(rawText, receivedAt)
+        } catch (error: Throwable) {
+            Log.e(TAG, "createCandidate parser failed. textLength=${rawText.length}, sourceApp=$sourceApp", error)
+            throw error
+        }
+        Log.i(
+            TAG,
+            "createCandidate parsed text. hasTitle=${parsed.title.isNotBlank()}, hasStart=${parsed.startAt != null}, hasEnd=${parsed.endAt != null}, hasLocation=${parsed.location != null}, confidence=${parsed.confidence}, timeConfidence=${parsed.timeConfidence.dbValue}",
+        )
         val localCandidate = AppointmentCandidateEntity(
             id = UUID.randomUUID().toString(),
             rawText = rawText,
@@ -94,7 +105,12 @@ class PlannerRepository(
             status = CandidateStatus.Pending.dbValue,
             createdAt = receivedAt,
         )
-        val saved = withContext(Dispatchers.IO) { client.createCandidate(sessionToken(), localCandidate) }
+        val saved = withContext(Dispatchers.IO) {
+            val token = sessionToken()
+            Log.i(TAG, "createCandidate sending API request. localCandidateId=${localCandidate.id}, tokenLength=${token.length}")
+            client.createCandidate(token, localCandidate)
+        }
+        Log.i(TAG, "createCandidate API save succeeded. candidateId=${saved.id}, status=${saved.status}")
         rememberCandidate(saved)
         refreshPendingCandidates()
         return saved
@@ -244,6 +260,9 @@ class PlannerRepository(
         sessionPrefs.getString(BuildConfig.PLANNER_SESSION_TOKEN_KEY, null)?.takeIf { it.isNotBlank() }
             ?: error("Login is required.")
 
+    private fun hasCachedSession(): Boolean =
+        sessionPrefs.getString(BuildConfig.PLANNER_SESSION_TOKEN_KEY, null)?.isNotBlank() == true
+
     private fun recurrenceFor(schedule: ScheduleEntity, recurrenceInput: RecurrenceInput): ScheduleRecurrenceRuleEntity? {
         val now = System.currentTimeMillis()
         return when (recurrenceInput) {
@@ -370,6 +389,7 @@ class PlannerRepository(
         }
 
     companion object {
+        private const val TAG = "PlannerRepository"
         private val scheduleZone: ZoneId = ZoneId.of("Asia/Seoul")
         private const val RecurrenceFrequencyDaily = "daily"
         private const val RecurrenceFrequencyWeekly = "weekly"
@@ -391,6 +411,8 @@ private fun mergeScheduleRecords(existing: List<ScheduleRecord>, updates: List<S
 
 private class PlannerApiClient(private val rawBaseUrl: String) {
     private val baseUrl = rawBaseUrl.trim().trimEnd('/')
+
+    fun isConfigured(): Boolean = baseUrl.isNotBlank()
 
     fun listSchedules(token: String, rangeStart: Long?, rangeEnd: Long?): List<ScheduleRecord> {
         val query = buildList {
@@ -433,8 +455,19 @@ private class PlannerApiClient(private val rawBaseUrl: String) {
     }
 
     fun createCandidate(token: String, candidate: AppointmentCandidateEntity): AppointmentCandidateEntity {
-        val json = JSONObject(request("POST", "/api/planner/candidates", token, candidate.toApiJson()))
-        return json.getJSONObject("candidate").toCandidate()
+        val response = request("POST", "/api/planner/candidates", token, candidate.toApiJson())
+        val json = try {
+            JSONObject(response)
+        } catch (error: Throwable) {
+            Log.e(TAG, "Create candidate response is not valid JSON. responseLength=${response.length}", error)
+            throw error
+        }
+        val envelope = json.optJSONObject("candidate")
+        if (envelope == null) {
+            Log.e(TAG, "Create candidate response is missing candidate envelope. keys=${json.keys().asSequence().toList()}")
+            error("Planner API response is missing candidate.")
+        }
+        return envelope.toCandidate()
     }
 
     fun listPendingCandidates(token: String): List<AppointmentCandidateEntity> =
@@ -465,24 +498,37 @@ private class PlannerApiClient(private val rawBaseUrl: String) {
     }
 
     private fun request(method: String, path: String, token: String, body: JSONObject?): String {
-        require(baseUrl.isNotBlank()) { "Planner API is not configured." }
-        val connection = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 15000
-            readTimeout = 15000
-            setRequestProperty("Authorization", "Bearer $token")
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Accept", "application/json")
-            if (body != null) {
-                doOutput = true
-                outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+        require(isConfigured()) { "Planner API is not configured." }
+        Log.i(TAG, "Planner API request started. method=$method, path=$path, tokenLength=${token.length}, hasBody=${body != null}")
+        try {
+            val connection = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
+                requestMethod = method
+                connectTimeout = 15000
+                readTimeout = 15000
+                setRequestProperty("Authorization", "Bearer $token")
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Accept", "application/json")
+                if (body != null) {
+                    doOutput = true
+                    outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                }
             }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.use { input -> BufferedReader(InputStreamReader(input)).readText() }.orEmpty()
+            if (code !in 200..299) {
+                Log.e(TAG, "Planner API request failed. method=$method, path=$path, status=$code, error=${apiErrorMessage(code, text)}, responseLength=${text.length}")
+                error(apiErrorMessage(code, text))
+            }
+            Log.i(TAG, "Planner API request succeeded. method=$method, path=$path, status=$code, responseLength=${text.length}")
+            return text.ifBlank {
+                Log.w(TAG, "Planner API returned an empty body. method=$method, path=$path")
+                "{}"
+            }
+        } catch (error: java.io.IOException) {
+            Log.e(TAG, "Planner API request threw before a usable response. method=$method, path=$path, tokenLength=${token.length}", error)
+            throw error
         }
-        val code = connection.responseCode
-        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-        val text = stream?.use { input -> BufferedReader(InputStreamReader(input)).readText() }.orEmpty()
-        if (code !in 200..299) error(apiErrorMessage(code, text))
-        return text.ifBlank { "{}" }
     }
 
     private fun ScheduleEntity.toApiJson(
@@ -635,6 +681,10 @@ private class PlannerApiClient(private val rawBaseUrl: String) {
     private fun JSONObject.putNullable(name: String, value: Any?): JSONObject = put(name, value ?: JSONObject.NULL)
     private fun parseInstantMillis(value: String): Long = Instant.parse(value).toEpochMilli()
     private fun url(value: String): String = URLEncoder.encode(value, "UTF-8")
+
+    companion object {
+        private const val TAG = "PlannerApiClient"
+    }
 }
 
 sealed interface SaveAttempt {

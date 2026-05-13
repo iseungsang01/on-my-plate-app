@@ -6,7 +6,7 @@
 
 1. `ShareReceiverActivity.onCreate` 또는 `PlannerScreen`의 직접 입력에서 공유/입력 텍스트를 받습니다.
 2. `PlannerRepository.createCandidate`가 `KoreanAppointmentParser.parse`로 일정 후보를 파싱하고 `planner-api` 후보 API에 저장합니다.
-3. `AppointmentNotificationManager.showCandidate` 또는 `CandidateEditScreen`이 사용자에게 제목 입력을 요구합니다.
+3. `AppointmentNotificationManager.showCandidate` 또는 `CandidateEditScreen`이 자동 생성 제목을 기본값으로 보여 주고 사용자가 필요하면 수정합니다.
 4. `PlannerRepository.saveFromCandidate`가 제목 필수 조건, 미정 저장, 충돌 확인, 강제 저장, 반복 규칙 저장을 처리합니다.
 5. 저장된 `ScheduleEntity`와 반복 규칙/예외는 `observeExpandedSchedules`로 주간 occurrence가 된 뒤 `PlannerWidgetSync.saveSnapshot`으로 위젯 snapshot에 반영됩니다.
 
@@ -40,12 +40,12 @@
   - 알림 권한 요청 결과가 돌아오면 결과와 무관하게 보관된 공유 텍스트 저장을 계속 진행합니다.
 
 - `saveAndNotify()`
-  - 앱 세션이 없으면 공유 원문/공유 앱/수신 시각을 `MainActivity.sharedTextIntent`로 넘겨 로그인 후 후보 생성을 이어가게 합니다.
-  - 저장에 성공하고 후보 알림이 실제로 표시되면 앱 화면을 열지 않고 투명 공유 수신 Activity만 종료합니다.
-  - 저장에 성공했지만 알림 권한/앱 알림/채널 알림이 꺼져 있어 후보 알림을 표시할 수 없으면 후보 편집 화면으로 fallback 이동합니다.
-  - 저장에 실패하면 오류를 로그/토스트로 표시하고 바구니 route intent를 시작한 뒤 투명 공유 수신 Activity를 종료합니다.
+  - 앱 세션, API 설정, 세션 토큰 캐시 상태를 민감정보 없이 로그로 남긴 뒤 저장을 시도합니다.
+  - 앱 세션이 없으면 토스트와 로그만 남기고 `MainActivity`를 열지 않은 채 투명 공유 수신 Activity를 종료합니다.
   - 보관된 공유 텍스트로 `PlannerRepository.createCandidate`를 호출해 후보를 생성합니다.
-  - 생성된 후보에 대해 `AppointmentNotificationManager.showCandidate`로 제목 입력 알림을 띄웁니다.
+  - 생성된 후보에 대해 `AppointmentNotificationManager.showCandidate`로 후보 확인/저장 알림을 띄웁니다.
+  - 저장에는 성공했지만 알림 권한/앱 알림/채널 알림이 꺼져 알림을 표시할 수 없으면 토스트와 로그만 남기고 앱 화면을 열지 않습니다.
+  - 저장에 실패하면 오류 원인을 로그로 남기고 토스트를 표시한 뒤 앱 화면을 열지 않고 투명 공유 수신 Activity를 종료합니다.
   - 투명 공유 수신 Activity를 종료합니다.
 
 - `needsNotificationPermission()`
@@ -72,11 +72,11 @@
   - 수신 시각을 기준일로 변환합니다.
   - `parseDate`, `parseTime`, `parseLocation`을 호출해 날짜/시간/장소를 추출합니다.
   - 날짜와 시간이 모두 있으면 epoch milliseconds `startAt`을 생성합니다.
-  - 제목은 항상 빈 문자열로 유지합니다.
+  - 시작 시각이 있으면 종료 시각 기본값은 1시간 뒤로 채우고, 제목이 비어 있으면 `M/d HHmm-HHmm 장소` 형식의 기본 제목을 만듭니다.
 
 - `mergeFallback(fallback)`
   - LLM 결과의 `startAt`, `endAt`, `location`이 없으면 로컬 fallback 값을 채웁니다.
-  - 제목은 자동 추출하지 않도록 항상 빈 문자열로 고정합니다.
+  - LLM 제목이 비어 있으면 fallback 제목을 사용하고, fallback 제목도 없으면 병합된 시작/종료/장소 값으로 기본 제목을 만듭니다.
   - confidence는 두 결과 중 더 높은 값을 사용합니다.
 
 - `parseDate(text, baseDate)`
@@ -108,12 +108,13 @@
 
 - `prompt(rawText, receivedAt)`
   - Gemini에게 한 개의 일정에서 시작/종료 시각, 장소, confidence만 JSON으로 추출하라고 지시합니다.
-  - 제목은 만들거나 추출하지 말라고 명시합니다.
+  - `title`, `start_at_epoch_millis`, `end_at_epoch_millis`, `location`, `confidence` JSON을 반환하게 하고 few-shot 예시로 제목 형식과 기본 1시간 종료 시각을 고정합니다.
   - 상대 날짜는 `Asia/Seoul` 수신 시각 기준으로 해석하게 합니다.
 
 - `parseResponse(responseText)`
   - Gemini 응답의 `candidates[0].content.parts[0].text`를 꺼내 JSON 코드블록 마커를 제거합니다.
-  - `start_at_epoch_millis`, `end_at_epoch_millis`, `location`, `confidence`를 `AppointmentParseResult`로 변환합니다.
+  - `title`, `start_at_epoch_millis`, `end_at_epoch_millis`, `location`, `confidence`를 `AppointmentParseResult`로 변환합니다.
+  - 시작 시각은 있지만 제목이나 종료 시각이 비어 있으면 앱 기본 규칙으로 제목과 1시간 종료 시각을 채웁니다.
   - 시작 시간이 있으면 시간 신뢰도는 `High`, 없으면 `Low`로 둡니다.
 
 - `JSONObject.optNullableLong(name)`
@@ -260,7 +261,7 @@
 
 - `createCandidate(rawText, sourceApp, receivedAt)`
   - 공유/직접 입력 텍스트를 파싱합니다.
-  - 파싱 결과로 `AppointmentCandidateEntity`를 만들되 제목은 빈 값으로 둡니다.
+  - 파싱 결과로 `AppointmentCandidateEntity`를 만들며, 시작 시각이 있으면 자동 생성 제목과 기본 종료 시각을 함께 저장할 수 있습니다.
   - `sourceApp`은 blank면 null로 저장합니다.
   - 후보 상태는 `pending`으로 저장합니다.
 
@@ -319,7 +320,7 @@
 - `showCandidate(candidate)`
   - 알림 권한이 있으면 후보 알림을 표시합니다.
   - 후보 알림을 실제로 게시하면 `true`, 권한/앱 알림/채널 알림 차단으로 표시할 수 없으면 `false`를 반환합니다.
-  - 파싱된 시간/장소를 보여주고, inline `RemoteInput`으로 제목을 입력해 저장할 수 있는 액션을 제공합니다.
+  - 파싱된 제목/시간/장소를 보여주고, inline `RemoteInput`으로 제목을 수정해 저장할 수 있는 액션을 제공합니다.
   - 편집 화면으로 이동하는 액션도 제공합니다.
 
 - `showConflict(candidate, existing)`
@@ -348,7 +349,7 @@
   - 후보 알림의 한 줄 요약을 만듭니다. 시작 시각이 없으면 “시간 미정” 취지의 문구를 사용하고 장소를 덧붙입니다.
 
 - `candidateDetails(candidate)`
-  - 후보 알림의 expanded text를 만듭니다. 제목 직접 입력 안내와 공유 출처를 포함합니다.
+  - 후보 알림의 expanded text를 만듭니다. 자동 제목을 수정할 수 있다는 안내와 공유 출처를 포함합니다.
 
 - `formatRange(startAt, endAt)`
   - 알림에 표시할 일정 구간 문자열을 만듭니다. 종료 시각이 없으면 기본 1시간을 적용합니다.
@@ -374,7 +375,7 @@
   - `RemoteInput`에서 사용자가 입력한 제목을 읽습니다.
   - intent의 상태 값을 `ScheduleStatus`로 변환합니다.
   - `PlannerRepository.saveFromCandidate`를 호출합니다.
-  - 제목이 없으면 후보 알림을 다시 보여주고, 충돌이면 충돌 알림을 띄웁니다.
+  - 제목 override가 없으면 후보의 자동 생성 제목으로 저장하고, 제목이 여전히 없으면 후보 알림을 다시 보여주며, 충돌이면 충돌 알림을 띄웁니다.
   - 충돌 알림을 유지해야 하는지 boolean으로 반환합니다.
 
 ---
@@ -793,7 +794,7 @@
 
 - `AppointmentCandidateEntity`
   - 공유/직접 입력으로 생성된 “일정 후보”입니다.
-  - 원본 텍스트, 공유 출처, 파싱된 시작/종료/장소, 사용자가 입력할 제목, 상태, 생성 시각을 보관합니다.
+  - 원본 텍스트, 공유 출처, 파싱된 시작/종료/장소, 자동 생성 또는 사용자가 수정한 제목, 상태, 생성 시각을 보관합니다.
 
 ### `data/entity/ScheduleEntity.kt`
 

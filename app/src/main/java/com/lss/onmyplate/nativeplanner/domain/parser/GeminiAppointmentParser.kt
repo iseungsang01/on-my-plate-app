@@ -68,14 +68,26 @@ class GeminiAppointmentParser(
             You extract one calendar appointment from Korean shared text.
             Current received time is $received in Asia/Seoul. Resolve relative dates from it.
             Return only JSON with this shape:
-            {"start_at_epoch_millis":number|null,"end_at_epoch_millis":number|null,"location":"string|null","confidence":0.0}
+            {"title":"string|null","start_at_epoch_millis":number|null,"end_at_epoch_millis":number|null,"location":"string|null","confidence":0.0}
             Rules:
+            - Extract exactly one appointment. If multiple appointments appear, choose the most concrete one.
             - If month/day has no year, choose the next upcoming date from the received time.
-            - For Korean evening/저녁, use PM. Example 저녁 7시 = 19:00.
-            - If an end time is not explicit, set end_at_epoch_millis to null.
-            - Do not extract or invent an appointment title. The user will type the title manually.
+            - Interpret Korean afternoon, evening, dinner, and night wording as PM when appropriate.
+            - If a start time exists and an end time is not explicit, set end_at_epoch_millis to exactly one hour after start_at_epoch_millis.
             - Do not invent location if absent.
+            - Title must summarize parsed date, time range, and location only. Format: M/d HHmm-HHmm location. Omit the trailing location when absent.
+            - If start_at_epoch_millis is null, title must be null.
             - Use confidence 0.0 to 1.0 based on how explicit the appointment details are.
+
+            Examples:
+            Text: 5/13 16:00-17:00 Gangnam meeting
+            JSON: {"title":"5/13 1600-1700 Gangnam","start_at_epoch_millis":1778655600000,"end_at_epoch_millis":1778659200000,"location":"Gangnam","confidence":0.95}
+
+            Text: tomorrow 2 PM cafe
+            JSON: {"title":"5/8 1400-1500 cafe","start_at_epoch_millis":1778216400000,"end_at_epoch_millis":1778220000000,"location":"cafe","confidence":0.9}
+
+            Text: next Friday 10 AM call
+            JSON: {"title":"5/15 1000-1100","start_at_epoch_millis":1778781600000,"end_at_epoch_millis":1778785200000,"location":null,"confidence":0.8}
 
             Text:
             $rawText
@@ -99,11 +111,20 @@ class GeminiAppointmentParser(
             ?: return null
         val json = JSONObject(text)
         val startAt = json.optNullableLong("start_at_epoch_millis")
+        val location = json.optString("location").takeIf { it.isNotBlank() && it != "null" }
+        val endAt = startAt?.let { AppointmentTitleFormatter.defaultEnd(it, json.optNullableLong("end_at_epoch_millis")) }
+        val title = if (startAt == null) {
+            ""
+        } else {
+            json.optString("title")
+                .takeIf { it.isNotBlank() && it != "null" }
+                ?: AppointmentTitleFormatter.format(startAt, endAt, location, zoneId)
+        }
         return AppointmentParseResult(
-            title = "",
+            title = title,
             startAt = startAt,
-            endAt = json.optNullableLong("end_at_epoch_millis"),
-            location = json.optString("location").takeIf { it.isNotBlank() && it != "null" },
+            endAt = endAt,
+            location = location,
             confidence = json.optDouble("confidence", if (startAt != null) 0.85 else 0.5).toFloat().coerceIn(0f, 1f),
             timeConfidence = if (startAt != null) TimeConfidence.High else TimeConfidence.Low,
         )

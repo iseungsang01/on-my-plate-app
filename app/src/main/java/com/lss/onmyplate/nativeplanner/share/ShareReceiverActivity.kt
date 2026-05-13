@@ -10,7 +10,6 @@ import android.util.Log
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.lss.onmyplate.nativeplanner.OnMyPlateApp
-import com.lss.onmyplate.nativeplanner.ui.MainActivity
 import kotlinx.coroutines.launch
 
 class ShareReceiverActivity : Activity() {
@@ -22,6 +21,7 @@ class ShareReceiverActivity : Activity() {
         super.onCreate(savedInstanceState)
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
         if (intent.action != Intent.ACTION_SEND || intent.type != "text/plain" || sharedText.isNullOrBlank()) {
+            Log.w(TAG, "Ignoring unsupported share intent. action=${intent.action}, type=${intent.type}, hasText=${!sharedText.isNullOrBlank()}")
             finish()
             return
         }
@@ -29,8 +29,10 @@ class ShareReceiverActivity : Activity() {
         pendingSharedText = sharedText
         pendingSourceApp = callingPackage
         pendingReceivedAt = System.currentTimeMillis()
+        Log.i(TAG, "Received shared text. textLength=${sharedText.length}, sourceApp=$pendingSourceApp")
 
         if (needsNotificationPermission()) {
+            Log.i(TAG, "Notification permission is missing. Requesting POST_NOTIFICATIONS before saving shared text.")
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
             return
         }
@@ -41,6 +43,8 @@ class ShareReceiverActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_NOTIFICATIONS) {
+            val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+            Log.i(TAG, "Notification permission result received. granted=$granted")
             saveAndNotify()
         }
     }
@@ -48,6 +52,7 @@ class ShareReceiverActivity : Activity() {
     private fun saveAndNotify() {
         val sharedText = pendingSharedText
         if (sharedText.isNullOrBlank()) {
+            Log.w(TAG, "No pending shared text found when saveAndNotify was called.")
             finish()
             return
         }
@@ -55,40 +60,43 @@ class ShareReceiverActivity : Activity() {
         val app = application as OnMyPlateApp
         val sourceApp = pendingSourceApp
         val receivedAt = pendingReceivedAt.takeIf { it > 0L } ?: System.currentTimeMillis()
+        val sessionState = app.authRepository.debugSessionState()
+        Log.i(TAG, "Share save preflight. $sessionState")
         if (!app.authRepository.hasAppAccess()) {
+            Log.w(TAG, "Cannot save shared text because no app session is cached. $sessionState")
             Toast.makeText(
                 this,
-                "로그인 후 약속 정보를 저장합니다.",
+                "로그인 세션이 없어 약속 정보를 저장하지 못했습니다.",
                 Toast.LENGTH_LONG,
             ).show()
-            startActivity(MainActivity.sharedTextIntent(this, sharedText, sourceApp, receivedAt))
             finish()
             return
         }
         app.appScope.launch {
             try {
+                Log.i(TAG, "Creating appointment candidate from shared text. textLength=${sharedText.length}, sourceApp=$sourceApp")
                 val candidate = app.repository.createCandidate(sharedText, sourceApp, receivedAt)
+                Log.i(TAG, "Appointment candidate saved. candidateId=${candidate.id}, hasStart=${candidate.extractedStartAt != null}, hasLocation=${candidate.extractedLocation != null}")
                 val notificationShown = app.notifications.showCandidate(candidate)
+                Log.i(TAG, "Candidate notification requested. candidateId=${candidate.id}, shown=$notificationShown")
                 runOnUiThread {
                     if (!notificationShown) {
                         Toast.makeText(
                             this@ShareReceiverActivity,
-                            "알림이 꺼져 있어 앱에서 약속을 확인합니다.",
+                            "알림이 꺼져 있어 약속 정보는 바구니에만 저장되었습니다.",
                             Toast.LENGTH_LONG,
                         ).show()
-                        startActivity(MainActivity.candidateIntent(this@ShareReceiverActivity, candidate.id))
                     }
                     finish()
                 }
             } catch (error: Throwable) {
-                Log.e(TAG, "Failed to save shared appointment text.", error)
+                Log.e(TAG, "Failed to save shared appointment text. textLength=${sharedText.length}, sourceApp=$sourceApp, ${app.authRepository.debugSessionState()}", error)
                 runOnUiThread {
                     Toast.makeText(
                         this@ShareReceiverActivity,
                         "약속 정보를 저장하지 못했습니다. 로그인 또는 네트워크를 확인해 주세요.",
                         Toast.LENGTH_LONG,
                     ).show()
-                    startActivity(MainActivity.basketIntent(this@ShareReceiverActivity))
                     finish()
                 }
             }

@@ -33,12 +33,12 @@ class KoreanAppointmentParser(
     )
 
     suspend fun parse(rawText: String, receivedAt: Long): AppointmentParseResult {
-        val local = parseLocally(rawText, receivedAt)
+        val local = parseLocally(rawText, receivedAt).withAppointmentDefaults()
         if (preferLlm) {
-            return llmParser?.parse(rawText, receivedAt)?.mergeFallback(local) ?: local
+            return llmParser?.parse(rawText, receivedAt)?.mergeFallback(local)?.withAppointmentDefaults() ?: local
         }
         if (local.startAt != null && local.confidence >= 0.67f) return local
-        return llmParser?.parse(rawText, receivedAt)?.mergeFallback(local) ?: local
+        return llmParser?.parse(rawText, receivedAt)?.mergeFallback(local)?.withAppointmentDefaults() ?: local
     }
 
     private fun parseLocally(rawText: String, receivedAt: Long): AppointmentParseResult {
@@ -62,14 +62,23 @@ class KoreanAppointmentParser(
         )
     }
 
-    private fun AppointmentParseResult.mergeFallback(fallback: AppointmentParseResult): AppointmentParseResult =
-        copy(
-            title = "",
-            startAt = startAt ?: fallback.startAt,
-            endAt = endAt ?: fallback.endAt,
+    private fun AppointmentParseResult.mergeFallback(fallback: AppointmentParseResult): AppointmentParseResult {
+        val mergedStartAt = startAt ?: fallback.startAt
+        val mergedEndAt = endAt ?: fallback.endAt.takeIf { startAt == null || startAt == fallback.startAt }
+        return copy(
+            title = title.ifBlank { fallback.title },
+            startAt = mergedStartAt,
+            endAt = mergedEndAt,
             location = location ?: fallback.location,
             confidence = confidence.coerceAtLeast(fallback.confidence),
         )
+    }
+
+    private fun AppointmentParseResult.withAppointmentDefaults(): AppointmentParseResult {
+        val defaultedEndAt = startAt?.let { AppointmentTitleFormatter.defaultEnd(it, endAt) }
+        val defaultedTitle = title.ifBlank { AppointmentTitleFormatter.format(startAt, defaultedEndAt, location, zoneId) }
+        return copy(title = defaultedTitle, endAt = defaultedEndAt)
+    }
 
     private fun parseDate(text: String, baseDate: LocalDate): LocalDate? {
         if ("오늘" in text) return baseDate

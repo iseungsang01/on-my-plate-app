@@ -1,6 +1,7 @@
 package com.lss.onmyplate.nativeplanner.data.auth
 
 import android.content.Context
+import android.util.Log
 import com.lss.onmyplate.nativeplanner.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -19,6 +20,16 @@ class AuthRepository(context: Context) {
     fun hasSession(): Boolean = sessionToken() != null
     fun hasAppAccess(): Boolean = hasSession()
     fun sessionToken(): String? = sessionPrefs.getString(BuildConfig.PLANNER_SESSION_TOKEN_KEY, null)?.takeIf { it.isNotBlank() }
+    fun debugSessionState(): AuthSessionDebugState {
+        val token = sessionToken()
+        return AuthSessionDebugState(
+            prefsName = BuildConfig.PLANNER_SESSION_PREFS_NAME,
+            tokenKey = BuildConfig.PLANNER_SESSION_TOKEN_KEY,
+            apiConfigured = client.isConfigured(),
+            hasToken = token != null,
+            tokenLength = token?.length ?: 0,
+        )
+    }
 
     fun clearSession() {
         sessionPrefs.edit().remove(BuildConfig.PLANNER_SESSION_TOKEN_KEY).apply()
@@ -45,11 +56,27 @@ class AuthRepository(context: Context) {
         sessionPrefs.edit()
             .putString(BuildConfig.PLANNER_SESSION_TOKEN_KEY, session.sessionToken)
             .apply()
+        Log.i(TAG, "Auth session cached. ${debugSessionState()}")
         session
+    }
+
+    companion object {
+        private const val TAG = "AuthRepository"
     }
 }
 
 data class AuthSession(val sessionToken: String, val userId: String?)
+
+data class AuthSessionDebugState(
+    val prefsName: String,
+    val tokenKey: String,
+    val apiConfigured: Boolean,
+    val hasToken: Boolean,
+    val tokenLength: Int,
+) {
+    override fun toString(): String =
+        "AuthSessionDebugState(prefsName=$prefsName, tokenKey=$tokenKey, apiConfigured=$apiConfigured, hasToken=$hasToken, tokenLength=$tokenLength)"
+}
 
 private class PlannerAuthApiClient(private val rawBaseUrl: String) {
     private val baseUrl = rawBaseUrl.trim().trimEnd('/')
