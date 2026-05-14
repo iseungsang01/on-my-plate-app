@@ -16,14 +16,20 @@ class GeminiAppointmentParser(
     private val model: String,
     private val baseUrl: String,
     private val zoneId: ZoneId = ZoneId.of("Asia/Seoul"),
+    private val diagnostics: ((String, Throwable?) -> Unit)? = null,
 ) : AppointmentLlmParser {
     override suspend fun parse(rawText: String, receivedAt: Long): AppointmentParseResult? {
-        if (apiKey.isBlank()) return null
+        if (apiKey.isBlank()) {
+            diagnostics?.invoke("Gemini parser skipped because apiKey is blank.", null)
+            return null
+        }
         return runCatching {
             withContext(Dispatchers.IO) {
                 val responseText = post(rawText, receivedAt)
                 parseResponse(responseText)
             }
+        }.onFailure { error ->
+            diagnostics?.invoke("Gemini parser failed. textLength=${rawText.length}, model=$model, baseUrlConfigured=${baseUrl.isNotBlank()}", error)
         }.getOrNull()
     }
 

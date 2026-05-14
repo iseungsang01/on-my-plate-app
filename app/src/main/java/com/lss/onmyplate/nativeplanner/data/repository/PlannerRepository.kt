@@ -105,10 +105,18 @@ class PlannerRepository(
             status = CandidateStatus.Pending.dbValue,
             createdAt = receivedAt,
         )
-        val saved = withContext(Dispatchers.IO) {
-            val token = sessionToken()
-            Log.i(TAG, "createCandidate sending API request. localCandidateId=${localCandidate.id}, tokenLength=${token.length}")
-            client.createCandidate(token, localCandidate)
+        val saved = try {
+            withContext(Dispatchers.IO) {
+                val token = sessionToken()
+                Log.i(
+                    TAG,
+                    "createCandidate sending API request. ${localCandidate.diagnosticSummary()}, tokenLength=${token.length}",
+                )
+                client.createCandidate(token, localCandidate)
+            }
+        } catch (error: Throwable) {
+            Log.e(TAG, "createCandidate API save failed. ${localCandidate.diagnosticSummary()}", error)
+            throw error
         }
         Log.i(TAG, "createCandidate API save succeeded. candidateId=${saved.id}, status=${saved.status}")
         rememberCandidate(saved)
@@ -255,6 +263,9 @@ class PlannerRepository(
     private fun rememberCandidate(candidate: AppointmentCandidateEntity) {
         candidateRecords.value = candidateRecords.value + (candidate.id to candidate)
     }
+
+    private fun AppointmentCandidateEntity.diagnosticSummary(): String =
+        "localCandidateId=$id, rawTextLength=${rawText.length}, hasSourceApp=${sourceApp != null}, hasTitle=${extractedTitle.isNotBlank()}, hasStart=${extractedStartAt != null}, hasEnd=${extractedEndAt != null}, hasLocation=${extractedLocation != null}, confidence=$confidence, timeConfidence=$timeConfidence, status=$status, createdAt=$createdAt"
 
     private fun sessionToken(): String =
         sessionPrefs.getString(BuildConfig.PLANNER_SESSION_TOKEN_KEY, null)?.takeIf { it.isNotBlank() }
@@ -517,7 +528,10 @@ private class PlannerApiClient(private val rawBaseUrl: String) {
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.use { input -> BufferedReader(InputStreamReader(input)).readText() }.orEmpty()
             if (code !in 200..299) {
-                Log.e(TAG, "Planner API request failed. method=$method, path=$path, status=$code, error=${apiErrorMessage(code, text)}, responseLength=${text.length}")
+                Log.e(
+                    TAG,
+                    "Planner API request failed. method=$method, path=$path, status=$code, error=${apiErrorMessage(code, text)}, responseLength=${text.length}, responseSnippet=${text.safeSnippet()}",
+                )
                 error(apiErrorMessage(code, text))
             }
             Log.i(TAG, "Planner API request succeeded. method=$method, path=$path, status=$code, responseLength=${text.length}")
@@ -652,6 +666,9 @@ private class PlannerApiClient(private val rawBaseUrl: String) {
         }.getOrNull()
         return apiMessage ?: "Planner API request failed ($code)"
     }
+
+    private fun String.safeSnippet(maxLength: Int = 500): String =
+        replace(Regex("\\s+"), " ").take(maxLength)
 
     private fun JSONObject.optRequiredString(vararg names: String): String {
         names.forEach { name -> optNullableString(name)?.let { return it } }

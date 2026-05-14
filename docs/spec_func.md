@@ -97,6 +97,7 @@
 ### `domain/parser/GeminiAppointmentParser.kt`
 
 - `parse(rawText, receivedAt)`
+  - API key blank or LLM request/response parsing failures may be reported through the optional diagnostics callback before the parser returns `null`.
   - Gemini API key가 비어 있으면 즉시 `null`을 반환합니다.
   - IO dispatcher에서 `post`와 `parseResponse`를 실행합니다.
   - 네트워크/API/JSON 오류가 발생하면 예외를 밖으로 던지지 않고 `null`로 처리합니다.
@@ -264,6 +265,7 @@
   - 파싱 결과로 `AppointmentCandidateEntity`를 만들며, 시작 시각이 있으면 자동 생성 제목과 기본 종료 시각을 함께 저장할 수 있습니다.
   - `sourceApp`은 blank면 null로 저장합니다.
   - 후보 상태는 `pending`으로 저장합니다.
+  - Planner API save failures log the candidate payload shape and response snippet without logging the raw shared text body.
 
 - `conflictsForCandidate(candidateId, titleOverride)`
   - 후보가 존재하지 않으면 `MissingCandidate`를 반환합니다.
@@ -476,6 +478,7 @@
   - pending 후보가 없으면 체크할 애매한 일정이 없다는 안내 카드를 표시합니다.
   - 하단의 `확정한 일정` 접힘 섹션에서 `observeExpandedSchedules(rangeStart, rangeEnd)`로 저장된 일정과 반복 occurrence를 함께 표시합니다.
   - 확정 일정 필터는 `하루`, `7일`, `한 달`, `기간`이며, `기간`은 시작일 00:00부터 종료일 다음날 00:00 전까지 조회합니다.
+  - Direct input save failures are logged, shown as a toast, and kept inside the current screen instead of escaping the coroutine.
 
 - `CandidateBasketCard(candidate, onClick, modifier)`
   - 후보 카드 클릭 시 후보 상세 편집 화면을 엽니다.

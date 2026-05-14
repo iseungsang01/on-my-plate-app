@@ -1,6 +1,8 @@
 package com.lss.onmyplate.nativeplanner.ui
 
 import android.app.DatePickerDialog
+import android.util.Log
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -45,11 +47,13 @@ import java.time.format.DateTimeFormatter
 
 private val basketZone = ZoneId.of("Asia/Seoul")
 private val basketDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+private const val BasketTag = "BasketScreen"
 
 @Composable
 fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Unit) {
     val pending by repository.observePendingCandidates().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var directInput by remember { mutableStateOf("") }
     var isCreatingCandidate by remember { mutableStateOf(false) }
     var confirmedExpanded by remember { mutableStateOf(false) }
@@ -111,6 +115,13 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
                                     val candidate = repository.createCandidate(rawText, "internal", System.currentTimeMillis())
                                     directInput = ""
                                     onOpenCandidate(candidate.id)
+                                } catch (error: Throwable) {
+                                    Log.e(BasketTag, "Failed to create appointment candidate from direct input. textLength=${rawText.length}", error)
+                                    Toast.makeText(
+                                        context,
+                                        "Appointment parsing failed. Check login, network, and parser logs.",
+                                        Toast.LENGTH_LONG,
+                                    ).show()
                                 } finally {
                                     isCreatingCandidate = false
                                 }

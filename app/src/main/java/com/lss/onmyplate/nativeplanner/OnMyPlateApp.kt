@@ -1,6 +1,7 @@
 package com.lss.onmyplate.nativeplanner
 
 import android.app.Application
+import android.util.Log
 import com.lss.onmyplate.nativeplanner.BuildConfig
 import com.lss.onmyplate.nativeplanner.data.auth.AuthRepository
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
@@ -26,6 +27,9 @@ class OnMyPlateApp : Application() {
                 apiKey = BuildConfig.GEMINI_API_KEY,
                 model = BuildConfig.GEMINI_MODEL,
                 baseUrl = BuildConfig.GEMINI_API_BASE_URL,
+                diagnostics = { message, error ->
+                    if (error == null) Log.w(TAG, message) else Log.w(TAG, message, error)
+                },
             ),
             preferLlm = true,
         )
@@ -55,6 +59,7 @@ class OnMyPlateApp : Application() {
     }
 
     companion object {
+        private const val TAG = "OnMyPlateApp"
         lateinit var instance: OnMyPlateApp
             private set
     }
