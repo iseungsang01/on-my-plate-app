@@ -118,6 +118,38 @@ class PlannerRepository(
         return saved
     }
 
+    suspend fun createScheduleFromInput(rawText: String, sourceApp: String?, receivedAt: Long): ScheduleEntity {
+        Log.i(TAG, "createScheduleFromInput started. textLength=${rawText.length}, sourceApp=$sourceApp, apiConfigured=${client.isConfigured()}, hasSession=${hasCachedSession()}")
+        val cleanText = rawText.trim()
+        val startAt = receivedAt
+        val now = System.currentTimeMillis()
+        val schedule = ScheduleEntity(
+            id = UUID.randomUUID().toString(),
+            title = cleanText.lineSequence().firstOrNull()?.take(40)?.ifBlank { null } ?: "새 약속",
+            startAt = startAt,
+            endAt = startAt + ChronoUnit.HOURS.duration.toMillis(),
+            location = null,
+            memo = null,
+            status = ScheduleStatus.Planned.dbValue,
+            sourceText = cleanText,
+            sourceApp = sourceApp?.takeIf { it.isNotBlank() },
+            createdAt = now,
+            updatedAt = now,
+        )
+        val savedRecord = try {
+            withContext(Dispatchers.IO) {
+                val token = sessionToken()
+                Log.i(TAG, "createScheduleFromInput sending API request. scheduleId=${schedule.id}, titleLength=${schedule.title.length}, tokenLength=${token.length}")
+                client.createSchedule(token, schedule, null, emptyList())
+            }
+        } catch (error: Throwable) {
+            Log.e(TAG, "createScheduleFromInput API save failed. scheduleId=${schedule.id}, titleLength=${schedule.title.length}", error)
+            throw error
+        }
+        refreshSchedules()
+        return savedRecord.schedule
+    }
+
     suspend fun conflictsForCandidate(candidateId: String, titleOverride: String? = null): SaveAttempt {
         val candidate = getCandidate(candidateId) ?: return SaveAttempt.MissingCandidate
         val startAt = candidate.extractedStartAt ?: return SaveAttempt.NeedsUncertain(candidate)

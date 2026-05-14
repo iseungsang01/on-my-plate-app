@@ -138,7 +138,9 @@ Deno.serve(async (request) => {
 function normalizePath(pathname: string): string {
   const marker = `/${FUNCTION_NAME}`;
   const index = pathname.indexOf(marker);
-  const stripped = index >= 0 ? pathname.slice(index + marker.length) : pathname;
+  const stripped = index >= 0
+    ? pathname.slice(index + marker.length)
+    : pathname.replace(/^\/functions\/v1(?=\/|$)/, "");
   return stripped.startsWith("/") ? stripped : `/${stripped}`;
 }
 

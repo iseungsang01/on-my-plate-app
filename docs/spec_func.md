@@ -5,9 +5,9 @@
 ## 핵심 처리 흐름 요약
 
 1. `ShareReceiverActivity.onCreate` 또는 `PlannerScreen`의 직접 입력에서 공유/입력 텍스트를 받습니다.
-2. `PlannerRepository.createCandidate`가 입력 텍스트를 보존한 더미 일정 후보를 만들고 `planner-api` 후보 API에 저장합니다.
-3. `AppointmentNotificationManager.showCandidate` 또는 `CandidateEditScreen`이 자동 생성 제목을 기본값으로 보여 주고 사용자가 필요하면 수정합니다.
-4. `PlannerRepository.saveFromCandidate`가 제목 필수 조건, 미정 저장, 충돌 확인, 강제 저장, 반복 규칙 저장을 처리합니다.
+2. `PlannerRepository.createScheduleFromInput`이 입력 텍스트를 제목/sourceText로 보존한 개인 일정을 만들고 `planner-api` 일정 API에 저장합니다.
+3. 저장된 일정은 주간 일정 화면과 바구니의 저장 일정 섹션에서 조회됩니다.
+4. 후보 편집 경로는 기존 후보 알림/딥링크가 열릴 때만 후보 저장 처리를 담당합니다.
 5. 저장된 `ScheduleEntity`와 반복 규칙/예외는 `observeExpandedSchedules`로 주간 occurrence가 된 뒤 `PlannerWidgetSync.saveSnapshot`으로 위젯 snapshot에 반영됩니다.
 
 ---
@@ -42,9 +42,8 @@
 - `saveAndNotify()`
   - 앱 세션, API 설정, 세션 토큰 캐시 상태를 민감정보 없이 로그로 남긴 뒤 저장을 시도합니다.
   - 앱 세션이 없으면 토스트와 로그만 남기고 `MainActivity`를 열지 않은 채 투명 공유 수신 Activity를 종료합니다.
-  - 보관된 공유 텍스트로 `PlannerRepository.createCandidate`를 호출해 후보를 생성합니다.
-  - 생성된 후보에 대해 `AppointmentNotificationManager.showCandidate`로 후보 확인/저장 알림을 띄웁니다.
-  - 저장에는 성공했지만 알림 권한/앱 알림/채널 알림이 꺼져 알림을 표시할 수 없으면 토스트와 로그만 남기고 앱 화면을 열지 않습니다.
+  - 보관된 공유 텍스트로 `PlannerRepository.createScheduleFromInput`을 호출해 개인 일정을 바로 저장합니다.
+  - 저장에 성공하면 토스트를 표시하고 앱 화면을 열지 않습니다.
   - 저장에 실패하면 오류 원인을 로그로 남기고 토스트를 표시한 뒤 앱 화면을 열지 않고 투명 공유 수신 Activity를 종료합니다.
   - 투명 공유 수신 Activity를 종료합니다.
 
@@ -267,6 +266,11 @@
   - 후보 상태는 `pending`으로 저장합니다.
   - Planner API save failures log the candidate payload shape and response snippet without logging the raw shared text body.
 
+- `createScheduleFromInput(rawText, sourceApp, receivedAt)`
+  - 공유/직접 입력 텍스트를 제목과 `sourceText`로 보존합니다.
+  - 파싱과 후보 생성을 건너뛰고 수신 시각부터 1시간짜리 `planned` 개인 일정을 만듭니다.
+  - `planner-api`의 `/api/planner/schedules`에 저장한 뒤 일정 목록을 새로고침합니다.
+
 - `conflictsForCandidate(candidateId, titleOverride)`
   - 후보가 존재하지 않으면 `MissingCandidate`를 반환합니다.
   - 시작 시각이 없으면 `NeedsUncertain`을 반환합니다.
@@ -420,8 +424,8 @@
   - 충돌 해결 화면으로 이동하는 deep link intent를 생성합니다.
 
 - `AppRoot(route, onRoute)`
-  - 하단 탭은 `일정`, `바구니`, `설정`만 표시해 MVP 화면 표면을 주간 일정 확인, 후보 정리, 설정으로 제한합니다.
-  - 현재 route에 따라 로그인, 주간 일정, 후보 바구니, 공유, 설정, 일정 편집, 후보 편집, 충돌 해결, 추가 완료 화면 중 하나를 표시합니다. 공유 화면 route와 구현은 유지하지만 하단 탭에서는 노출하지 않습니다.
+  - 하단 탭은 `일정`, `바구니`, `설정`만 표시해 MVP 화면 표면을 주간 일정 확인, 약속 저장, 설정으로 제한합니다.
+  - 현재 route에 따라 로그인, 주간 일정, 약속 바구니, 공유, 설정, 일정 편집, 후보 편집, 충돌 해결, 추가 완료 화면 중 하나를 표시합니다. 공유 화면 route와 구현은 유지하지만 하단 탭에서는 노출하지 않습니다.
   - 메인 탭 route는 `MascotScaffold`로 감싸고, 후보 저장 완료 후에는 `Route.Complete(candidateId)`로 이동합니다.
 
 ### `ui/LoginScreen.kt`
@@ -471,19 +475,12 @@
 ### `ui/PlannerScreen.kt`
 
 - `BasketScreen(repository, onOpenCandidate)`
-  - `observePendingCandidates()`를 구독해 아직 처리되지 않아 정리가 필요한 약속 후보를 표시합니다.
-  - 화면 제목을 `약속 바구니`로 표시하고, 상단 문구는 확인할 후보 수를 안내합니다.
-  - 사용자가 약속 메시지를 직접 입력하면 `createCandidate`로 후보를 만들고 후보 상세 화면으로 이동합니다.
-  - 후보 생성 실패 시 실제 예외 메시지를 토스트와 카드 안의 `저장 실패` 문구로 표시합니다.
-  - 후보 목록은 `CandidateBasketCard`로 표시하며, 제목/시간/장소와 확인 필요 상태를 보여줍니다.
-  - pending 후보가 없으면 체크할 애매한 일정이 없다는 안내 카드를 표시합니다.
+  - 화면 제목을 `약속 바구니`로 표시하고, 상단 문구는 입력/공유한 약속을 바로 저장한다고 안내합니다.
+  - 사용자가 약속 메시지를 직접 입력하면 `createScheduleFromInput`으로 개인 일정을 저장합니다.
+  - 저장 실패 시 실제 예외 메시지를 토스트와 카드 안의 `저장 실패` 문구로 표시합니다.
   - 하단의 `확정한 일정` 접힘 섹션에서 `observeExpandedSchedules(rangeStart, rangeEnd)`로 저장된 일정과 반복 occurrence를 함께 표시합니다.
   - 확정 일정 필터는 `하루`, `7일`, `한 달`, `기간`이며, `기간`은 시작일 00:00부터 종료일 다음날 00:00 전까지 조회합니다.
   - Direct input save failures are logged, shown as a toast, and kept inside the current screen instead of escaping the coroutine.
-
-- `CandidateBasketCard(candidate, onClick, modifier)`
-  - 후보 카드 클릭 시 후보 상세 편집 화면을 엽니다.
-  - 제목과 시작 시간이 있으면 `확인 후 저장`, 부족하면 `정보 확인 필요` chip과 success/warning accent를 표시합니다.
 
 ### `ui/ScheduleEditScreen.kt`
 
@@ -723,7 +720,7 @@
 ### `supabase/functions/planner-api/index.ts`
 
 - `normalizePath(pathname)`
-  - Edge Function URL에서 `/planner-api` prefix를 제거해 내부 route path로 정규화합니다.
+  - Edge Function URL에서 `/planner-api` 또는 `/functions/v1` prefix를 제거해 내부 route path로 정규화합니다.
 
 - `signUp(request)`
   - id/password 요청을 읽어 user id로 salt 처리한 비밀번호 해시를 `planner_users`에 저장하고 `planner_profiles` 행을 보장합니다.

@@ -150,11 +150,12 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val app = applicationContext as OnMyPlateApp
             try {
-                val candidate = app.repository.createCandidate(share.text, share.sourceApp, share.receivedAt)
-                val notificationShown = app.notifications.showCandidate(candidate)
-                if (!notificationShown) {
-                    routeState.value = Route.Candidate(candidate.id)
-                }
+                app.repository.createScheduleFromInput(share.text, share.sourceApp, share.receivedAt)
+                Toast.makeText(
+                    this@MainActivity,
+                    "약속을 저장했습니다.",
+                    Toast.LENGTH_LONG,
+                ).show()
             } catch (error: Throwable) {
                 Toast.makeText(
                     this@MainActivity,

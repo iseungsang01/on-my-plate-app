@@ -74,19 +74,15 @@ class ShareReceiverActivity : Activity() {
         }
         app.appScope.launch {
             try {
-                Log.i(TAG, "Creating appointment candidate from shared text. textLength=${sharedText.length}, sourceApp=$sourceApp")
-                val candidate = app.repository.createCandidate(sharedText, sourceApp, receivedAt)
-                Log.i(TAG, "Appointment candidate saved. candidateId=${candidate.id}, hasStart=${candidate.extractedStartAt != null}, hasLocation=${candidate.extractedLocation != null}")
-                val notificationShown = app.notifications.showCandidate(candidate)
-                Log.i(TAG, "Candidate notification requested. candidateId=${candidate.id}, shown=$notificationShown")
+                Log.i(TAG, "Saving appointment schedule from shared text. textLength=${sharedText.length}, sourceApp=$sourceApp")
+                val schedule = app.repository.createScheduleFromInput(sharedText, sourceApp, receivedAt)
+                Log.i(TAG, "Appointment schedule saved. scheduleId=${schedule.id}, titleLength=${schedule.title.length}")
                 runOnUiThread {
-                    if (!notificationShown) {
-                        Toast.makeText(
-                            this@ShareReceiverActivity,
-                            "알림이 꺼져 있어 약속 정보는 바구니에만 저장되었습니다.",
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    }
+                    Toast.makeText(
+                        this@ShareReceiverActivity,
+                        "약속을 저장했습니다.",
+                        Toast.LENGTH_LONG,
+                    ).show()
                     finish()
                 }
             } catch (error: Throwable) {

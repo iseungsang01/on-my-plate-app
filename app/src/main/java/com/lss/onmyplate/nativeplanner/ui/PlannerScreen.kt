@@ -8,8 +8,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -37,7 +35,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.lss.onmyplate.nativeplanner.data.entity.AppointmentCandidateEntity
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.repository.ScheduleOccurrence
 import kotlinx.coroutines.launch
@@ -52,12 +49,12 @@ private const val BasketTag = "BasketScreen"
 
 @Composable
 fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Unit) {
-    val pending by repository.observePendingCandidates().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var directInput by remember { mutableStateOf("") }
-    var isCreatingCandidate by remember { mutableStateOf(false) }
-    var createCandidateError by remember { mutableStateOf<String?>(null) }
+    var isSavingSchedule by remember { mutableStateOf(false) }
+    var saveScheduleError by remember { mutableStateOf<String?>(null) }
+    var saveScheduleMessage by remember { mutableStateOf<String?>(null) }
     var confirmedExpanded by remember { mutableStateOf(false) }
     var savedFilter by remember { mutableStateOf(SavedScheduleFilter.Day) }
     val today = remember { LocalDate.now(basketZone) }
@@ -81,7 +78,7 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("약속 바구니", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("공유하거나 입력한 약속 후보를 정리해요. 확인할 후보 ${pending.size}개", style = MaterialTheme.typography.bodySmall, color = FeedLoopColors.Secondary)
+                Text("공유하거나 입력한 약속을 바로 저장해요.", style = MaterialTheme.typography.bodySmall, color = FeedLoopColors.Secondary)
             }
 
             Card(
@@ -91,18 +88,19 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
                 elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("약속 후보 만들기", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("약속 저장하기", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     OutlinedTextField(
                         value = directInput,
                         onValueChange = {
                             directInput = it
-                            createCandidateError = null
+                            saveScheduleError = null
+                            saveScheduleMessage = null
                         },
                         label = { Text("약속 메시지 붙여넣기 또는 입력") },
                         placeholder = { Text("예: 다음 주 금요일 저녁 7시 강남에서 민수랑 저녁") },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2,
-                        enabled = !isCreatingCandidate,
+                        enabled = !isSavingSchedule,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = FeedLoopColors.Primary,
                             unfocusedBorderColor = FeedLoopColors.Border,
@@ -115,31 +113,39 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
                             val rawText = directInput.trim()
                             if (rawText.isBlank()) return@Button
                             scope.launch {
-                                isCreatingCandidate = true
-                                createCandidateError = null
+                                isSavingSchedule = true
+                                saveScheduleError = null
+                                saveScheduleMessage = null
                                 try {
-                                    val candidate = repository.createCandidate(rawText, "internal", System.currentTimeMillis())
+                                    val schedule = repository.createScheduleFromInput(rawText, "internal", System.currentTimeMillis())
                                     directInput = ""
-                                    onOpenCandidate(candidate.id)
+                                    saveScheduleMessage = "저장됨: ${schedule.title}"
                                 } catch (error: Throwable) {
-                                    Log.e(BasketTag, "Failed to create appointment candidate from direct input. textLength=${rawText.length}", error)
-                                    val message = createCandidateErrorMessage(error)
-                                    createCandidateError = message
+                                    Log.e(BasketTag, "Failed to save appointment from direct input. textLength=${rawText.length}", error)
+                                    val message = saveScheduleErrorMessage(error)
+                                    saveScheduleError = message
                                     Toast.makeText(
                                         context,
                                         message,
                                         Toast.LENGTH_LONG,
                                     ).show()
                                 } finally {
-                                    isCreatingCandidate = false
+                                    isSavingSchedule = false
                                 }
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = directInput.isNotBlank() && !isCreatingCandidate,
+                        enabled = directInput.isNotBlank() && !isSavingSchedule,
                         colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
-                    ) { Text(if (isCreatingCandidate) "분석 중..." else "후보로 담기") }
-                    createCandidateError?.let { message ->
+                    ) { Text(if (isSavingSchedule) "저장 중..." else "저장하기") }
+                    saveScheduleMessage?.let { message ->
+                        Text(
+                            text = message,
+                            color = FeedLoopColors.Success,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    saveScheduleError?.let { message ->
                         Text(
                             text = "저장 실패: $message",
                             color = MaterialTheme.colorScheme.error,
@@ -150,15 +156,6 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
             }
 
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                item {
-                    Text("정리할 약속 후보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                }
-                if (pending.isEmpty()) {
-                    item { EmptyBasketCard() }
-                }
-                items(pending, key = { it.id }) { candidate ->
-                    CandidateBasketCard(candidate = candidate, onClick = { onOpenCandidate(candidate.id) })
-                }
                 item {
                     SavedScheduleSection(
                         expanded = confirmedExpanded,
@@ -183,7 +180,7 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
     }
 }
 
-private fun createCandidateErrorMessage(error: Throwable): String {
+private fun saveScheduleErrorMessage(error: Throwable): String {
     val detail = generateSequence(error) { it.cause }
         .mapNotNull { it.message?.takeIf(String::isNotBlank) }
         .firstOrNull()
@@ -193,59 +190,6 @@ private fun createCandidateErrorMessage(error: Throwable): String {
         error is IOException || error.cause is IOException -> "네트워크 요청 실패: ${detail ?: error::class.java.simpleName}"
         detail != null -> detail
         else -> error::class.java.simpleName
-    }
-}
-
-@Composable
-fun CandidateBasketCard(candidate: AppointmentCandidateEntity, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val ready = candidate.extractedTitle.isNotBlank() && candidate.extractedStartAt != null
-    val accent = if (ready) FeedLoopColors.Success else FeedLoopColors.Warning
-    val statusText = if (ready) "확인 후 저장" else "정보 확인 필요"
-    Card(
-        modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface),
-        border = BorderStroke(1.dp, if (ready) FeedLoopColors.SuccessBorder else FeedLoopColors.WarningBorder),
-        elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
-    ) {
-        Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.width(4.dp).height(92.dp).clip(CircleShape).background(accent))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        candidate.extractedTitle.ifBlank { "무슨 약속인지 확인 필요" },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    AssistChip(
-                        onClick = onClick,
-                        label = { Text(statusText) },
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = if (ready) FeedLoopColors.SuccessBg else FeedLoopColors.WarningBg,
-                            labelColor = accent,
-                        ),
-                    )
-                }
-                Text(formatDateTime(candidate.extractedStartAt).ifBlank { "시간을 확인해 주세요" }, color = FeedLoopColors.Secondary, style = MaterialTheme.typography.bodySmall)
-                Text(candidate.extractedLocation ?: "장소를 나중에 정해도 돼요", color = FeedLoopColors.Secondary, style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text("열어서 확인", color = FeedLoopColors.PrimaryDark, style = MaterialTheme.typography.labelMedium)
-                    Text("저장 또는 보류", color = FeedLoopColors.Secondary, style = MaterialTheme.typography.labelMedium)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyBasketCard() {
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface), border = BorderStroke(1.dp, FeedLoopColors.Border)) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("정리할 약속 후보가 없어요", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("메시지를 입력하거나 Android 공유 기능으로 보내면 약속 후보로 담깁니다.", color = FeedLoopColors.Secondary)
-        }
     }
 }
 
