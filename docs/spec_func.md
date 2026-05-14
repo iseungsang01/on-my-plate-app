@@ -5,7 +5,7 @@
 ## 핵심 처리 흐름 요약
 
 1. `ShareReceiverActivity.onCreate` 또는 `PlannerScreen`의 직접 입력에서 공유/입력 텍스트를 받습니다.
-2. `PlannerRepository.createCandidate`가 `KoreanAppointmentParser.parse`로 일정 후보를 파싱하고 `planner-api` 후보 API에 저장합니다.
+2. `PlannerRepository.createCandidate`가 입력 텍스트를 보존한 더미 일정 후보를 만들고 `planner-api` 후보 API에 저장합니다.
 3. `AppointmentNotificationManager.showCandidate` 또는 `CandidateEditScreen`이 자동 생성 제목을 기본값으로 보여 주고 사용자가 필요하면 수정합니다.
 4. `PlannerRepository.saveFromCandidate`가 제목 필수 조건, 미정 저장, 충돌 확인, 강제 저장, 반복 규칙 저장을 처리합니다.
 5. 저장된 `ScheduleEntity`와 반복 규칙/예외는 `observeExpandedSchedules`로 주간 occurrence가 된 뒤 `PlannerWidgetSync.saveSnapshot`으로 위젯 snapshot에 반영됩니다.
@@ -261,8 +261,8 @@
   - 알림 처리 등 suspend 문맥에서 후보 1건을 직접 조회합니다.
 
 - `createCandidate(rawText, sourceApp, receivedAt)`
-  - 공유/직접 입력 텍스트를 파싱합니다.
-  - 파싱 결과로 `AppointmentCandidateEntity`를 만들며, 시작 시각이 있으면 자동 생성 제목과 기본 종료 시각을 함께 저장할 수 있습니다.
+  - 공유/직접 입력 텍스트를 `rawText`로 보존합니다.
+  - 파싱을 건너뛰고 더미 제목, 수신 시각 기준 시작/종료 시각, 더미 장소로 `AppointmentCandidateEntity`를 만듭니다.
   - `sourceApp`은 blank면 null로 저장합니다.
   - 후보 상태는 `pending`으로 저장합니다.
   - Planner API save failures log the candidate payload shape and response snippet without logging the raw shared text body.
@@ -474,6 +474,7 @@
   - `observePendingCandidates()`를 구독해 아직 처리되지 않아 정리가 필요한 약속 후보를 표시합니다.
   - 화면 제목을 `약속 바구니`로 표시하고, 상단 문구는 확인할 후보 수를 안내합니다.
   - 사용자가 약속 메시지를 직접 입력하면 `createCandidate`로 후보를 만들고 후보 상세 화면으로 이동합니다.
+  - 후보 생성 실패 시 실제 예외 메시지를 토스트와 카드 안의 `저장 실패` 문구로 표시합니다.
   - 후보 목록은 `CandidateBasketCard`로 표시하며, 제목/시간/장소와 확인 필요 상태를 보여줍니다.
   - pending 후보가 없으면 체크할 애매한 일정이 없다는 안내 카드를 표시합니다.
   - 하단의 `확정한 일정` 접힘 섹션에서 `observeExpandedSchedules(rangeStart, rangeEnd)`로 저장된 일정과 반복 occurrence를 함께 표시합니다.

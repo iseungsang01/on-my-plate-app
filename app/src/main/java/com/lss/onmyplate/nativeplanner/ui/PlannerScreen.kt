@@ -41,6 +41,7 @@ import com.lss.onmyplate.nativeplanner.data.entity.AppointmentCandidateEntity
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.repository.ScheduleOccurrence
 import kotlinx.coroutines.launch
+import java.io.IOException
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -56,6 +57,7 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
     val context = LocalContext.current
     var directInput by remember { mutableStateOf("") }
     var isCreatingCandidate by remember { mutableStateOf(false) }
+    var createCandidateError by remember { mutableStateOf<String?>(null) }
     var confirmedExpanded by remember { mutableStateOf(false) }
     var savedFilter by remember { mutableStateOf(SavedScheduleFilter.Day) }
     val today = remember { LocalDate.now(basketZone) }
@@ -92,7 +94,10 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
                     Text("약속 후보 만들기", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     OutlinedTextField(
                         value = directInput,
-                        onValueChange = { directInput = it },
+                        onValueChange = {
+                            directInput = it
+                            createCandidateError = null
+                        },
                         label = { Text("약속 메시지 붙여넣기 또는 입력") },
                         placeholder = { Text("예: 다음 주 금요일 저녁 7시 강남에서 민수랑 저녁") },
                         modifier = Modifier.fillMaxWidth(),
@@ -111,15 +116,18 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
                             if (rawText.isBlank()) return@Button
                             scope.launch {
                                 isCreatingCandidate = true
+                                createCandidateError = null
                                 try {
                                     val candidate = repository.createCandidate(rawText, "internal", System.currentTimeMillis())
                                     directInput = ""
                                     onOpenCandidate(candidate.id)
                                 } catch (error: Throwable) {
                                     Log.e(BasketTag, "Failed to create appointment candidate from direct input. textLength=${rawText.length}", error)
+                                    val message = createCandidateErrorMessage(error)
+                                    createCandidateError = message
                                     Toast.makeText(
                                         context,
-                                        "Appointment parsing failed. Check login, network, and parser logs.",
+                                        message,
                                         Toast.LENGTH_LONG,
                                     ).show()
                                 } finally {
@@ -131,6 +139,13 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
                         enabled = directInput.isNotBlank() && !isCreatingCandidate,
                         colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
                     ) { Text(if (isCreatingCandidate) "분석 중..." else "후보로 담기") }
+                    createCandidateError?.let { message ->
+                        Text(
+                            text = "저장 실패: $message",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
             }
 
@@ -165,6 +180,19 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
                 }
             }
         }
+    }
+}
+
+private fun createCandidateErrorMessage(error: Throwable): String {
+    val detail = generateSequence(error) { it.cause }
+        .mapNotNull { it.message?.takeIf(String::isNotBlank) }
+        .firstOrNull()
+    return when {
+        detail == "Login is required." -> "로그인이 필요합니다. 설정/로그인 화면에서 다시 로그인해 주세요."
+        detail == "Planner API is not configured." -> "Planner API 주소가 앱에 설정되지 않았습니다."
+        error is IOException || error.cause is IOException -> "네트워크 요청 실패: ${detail ?: error::class.java.simpleName}"
+        detail != null -> detail
+        else -> error::class.java.simpleName
     }
 }
 

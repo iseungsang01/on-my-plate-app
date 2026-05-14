@@ -10,6 +10,7 @@ import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceRuleEntity
 import com.lss.onmyplate.nativeplanner.domain.conflict.ConflictDetector
 import com.lss.onmyplate.nativeplanner.domain.model.CandidateStatus
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
+import com.lss.onmyplate.nativeplanner.domain.model.TimeConfidence
 import com.lss.onmyplate.nativeplanner.domain.parser.KoreanAppointmentParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -82,29 +83,22 @@ class PlannerRepository(
 
     suspend fun createCandidate(rawText: String, sourceApp: String?, receivedAt: Long): AppointmentCandidateEntity {
         Log.i(TAG, "createCandidate started. textLength=${rawText.length}, sourceApp=$sourceApp, apiConfigured=${client.isConfigured()}, hasSession=${hasCachedSession()}")
-        val parsed = try {
-            parser.parse(rawText, receivedAt)
-        } catch (error: Throwable) {
-            Log.e(TAG, "createCandidate parser failed. textLength=${rawText.length}, sourceApp=$sourceApp", error)
-            throw error
-        }
-        Log.i(
-            TAG,
-            "createCandidate parsed text. hasTitle=${parsed.title.isNotBlank()}, hasStart=${parsed.startAt != null}, hasEnd=${parsed.endAt != null}, hasLocation=${parsed.location != null}, confidence=${parsed.confidence}, timeConfidence=${parsed.timeConfidence.dbValue}",
-        )
+        val startAt = receivedAt
+        val endAt = startAt + ChronoUnit.HOURS.duration.toMillis()
         val localCandidate = AppointmentCandidateEntity(
             id = UUID.randomUUID().toString(),
             rawText = rawText,
             sourceApp = sourceApp?.takeIf { it.isNotBlank() },
-            extractedTitle = parsed.title,
-            extractedStartAt = parsed.startAt,
-            extractedEndAt = parsed.endAt,
-            extractedLocation = parsed.location,
-            confidence = parsed.confidence,
-            timeConfidence = parsed.timeConfidence.dbValue,
+            extractedTitle = "더미 약속 후보",
+            extractedStartAt = startAt,
+            extractedEndAt = endAt,
+            extractedLocation = "더미 장소",
+            confidence = 0f,
+            timeConfidence = TimeConfidence.Low.dbValue,
             status = CandidateStatus.Pending.dbValue,
             createdAt = receivedAt,
         )
+        Log.i(TAG, "createCandidate skipped parser and built dummy candidate. ${localCandidate.diagnosticSummary()}")
         val saved = try {
             withContext(Dispatchers.IO) {
                 val token = sessionToken()
