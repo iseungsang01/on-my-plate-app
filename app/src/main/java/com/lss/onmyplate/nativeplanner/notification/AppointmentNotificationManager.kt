@@ -32,7 +32,7 @@ class AppointmentNotificationManager(private val context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_APPOINTMENTS, "약속 후보", NotificationManager.IMPORTANCE_HIGH),
+                NotificationChannel(CHANNEL_APPOINTMENTS, "일정 디테일 설정", NotificationManager.IMPORTANCE_HIGH),
             )
             manager.createNotificationChannel(
                 NotificationChannel(CHANNEL_CONFLICTS, "일정 충돌", NotificationManager.IMPORTANCE_HIGH),
@@ -50,16 +50,14 @@ class AppointmentNotificationManager(private val context: Context) {
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_APPOINTMENTS)
             .setSmallIcon(R.drawable.ic_stat_calendar)
-            .setContentTitle("약속 제목을 입력하세요")
+            .setContentTitle("일정 디테일 설정")
             .setContentText(candidateSummary(candidate))
             .setStyle(NotificationCompat.BigTextStyle().bigText(candidateDetails(candidate)))
             .setContentIntent(contentIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
-            .addAction(saveAction(candidate.id, ScheduleStatus.Confirmed, "확정 저장"))
-            .addAction(saveAction(candidate.id, ScheduleStatus.Uncertain, "미정 저장"))
-            .addAction(editAction(candidate.id, "앱에서 수정"))
+            .addAction(saveAction(candidate.id, ScheduleStatus.Confirmed, "확정"))
             .build()
 
         notificationManager.notify(candidate.id.hashCode(), notification)
@@ -93,11 +91,7 @@ class AppointmentNotificationManager(private val context: Context) {
         notificationManager.cancel(candidateId.hashCode())
     }
 
-    private fun saveAction(
-        candidateId: String,
-        status: ScheduleStatus,
-        label: String,
-    ): NotificationCompat.Action {
+    private fun saveAction(candidateId: String, status: ScheduleStatus, label: String): NotificationCompat.Action {
         val intent = Intent(context, NotificationActionReceiver::class.java).apply {
             action = ACTION_SAVE
             putExtra(EXTRA_CANDIDATE_ID, candidateId)
@@ -106,21 +100,10 @@ class AppointmentNotificationManager(private val context: Context) {
         val pendingIntent = PendingIntent.getBroadcast(context, (candidateId + status.dbValue).hashCode(), intent, mutablePendingFlags())
         val builder = NotificationCompat.Action.Builder(R.drawable.ic_stat_calendar, label, pendingIntent)
         val remoteInput = RemoteInput.Builder(KEY_REMOTE_TITLE)
-            .setLabel("약속 제목")
+            .setLabel("일정 제목")
             .build()
         builder.addRemoteInput(remoteInput)
-
         return builder.build()
-    }
-
-    private fun editAction(candidateId: String, label: String): NotificationCompat.Action {
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            (candidateId + label).hashCode(),
-            MainActivity.candidateIntent(context, candidateId),
-            immutablePendingFlags(),
-        )
-        return NotificationCompat.Action.Builder(R.drawable.ic_stat_calendar, label, pendingIntent).build()
     }
 
     private fun conflictAction(candidateId: String, actionName: String, label: String): NotificationCompat.Action {
@@ -150,7 +133,7 @@ class AppointmentNotificationManager(private val context: Context) {
 
     private fun candidateDetails(candidate: AppointmentCandidateEntity): String {
         val source = candidate.sourceApp?.let { "\n공유 앱: $it" }.orEmpty()
-        return "${candidateSummary(candidate)}\n제목을 직접 입력합니다.$source"
+        return "${candidateSummary(candidate)}\n제목을 입력하고 확정하면 시간표에 저장됩니다.$source"
     }
 
     private fun formatRange(startAt: Long, endAt: Long?): String {

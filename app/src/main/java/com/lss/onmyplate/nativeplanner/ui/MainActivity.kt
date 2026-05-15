@@ -1,4 +1,4 @@
-﻿package com.lss.onmyplate.nativeplanner.ui
+package com.lss.onmyplate.nativeplanner.ui
 
 import android.Manifest
 import android.app.Activity
@@ -150,16 +150,18 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val app = applicationContext as OnMyPlateApp
             try {
-                app.repository.createScheduleFromInput(share.text, share.sourceApp, share.receivedAt)
+                val candidate = app.repository.createCandidate(share.text, share.sourceApp, share.receivedAt)
+                val notificationShown = app.notifications.showCandidate(candidate)
                 Toast.makeText(
                     this@MainActivity,
-                    "약속을 저장했습니다.",
+                    if (notificationShown) "\uc54c\ub9bc\uc5d0\uc11c \uc81c\ubaa9\uc744 \uc785\ub825\ud558\uace0 \ud655\uc815\ud574 \uc8fc\uc138\uc694." else "\uc54c\ub9bc\uc744 \ud45c\uc2dc\ud560 \uc218 \uc5c6\uc5b4 \uc571\uc5d0\uc11c \ub514\ud14c\uc77c\uc744 \uc124\uc815\ud574 \uc8fc\uc138\uc694.",
                     Toast.LENGTH_LONG,
                 ).show()
+                if (!notificationShown) routeState.value = Route.Candidate(candidate.id)
             } catch (error: Throwable) {
                 Toast.makeText(
                     this@MainActivity,
-                    "약속 정보를 저장하지 못했습니다. 로그인 또는 네트워크를 확인해 주세요.",
+                    "\uc77c\uc815 \ub514\ud14c\uc77c \uc124\uc815\uc744 \ub9cc\ub4e4\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \ub85c\uadf8\uc778 \ub610\ub294 \ub124\ud2b8\uc6cc\ud06c\ub97c \ud655\uc778\ud574 \uc8fc\uc138\uc694.",
                     Toast.LENGTH_LONG,
                 ).show()
                 routeState.value = Route.Basket
@@ -287,7 +289,7 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () 
         is Route.Candidate -> CandidateEditScreen(
             repository = app.repository,
             candidateId = route.candidateId,
-            onDone = { onRoute(Route.Complete(route.candidateId)) },
+            onDone = { onRoute(Route.Schedule) },
             onConflict = { onRoute(Route.Conflict(route.candidateId)) },
             onBack = { onRoute(Route.Basket) },
         )
@@ -295,7 +297,7 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () 
             repository = app.repository,
             candidateId = route.candidateId,
             onEdit = { onRoute(Route.Candidate(route.candidateId)) },
-            onDone = { onRoute(Route.Complete(route.candidateId)) },
+            onDone = { onRoute(Route.Schedule) },
         )
         is Route.Complete -> AppointmentAddedScreen(
             repository = app.repository,

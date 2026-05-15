@@ -10,6 +10,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.lss.onmyplate.nativeplanner.OnMyPlateApp
+import com.lss.onmyplate.nativeplanner.ui.MainActivity
 import kotlinx.coroutines.launch
 
 class ShareReceiverActivity : Activity() {
@@ -32,7 +33,7 @@ class ShareReceiverActivity : Activity() {
         Log.i(TAG, "Received shared text. textLength=${sharedText.length}, sourceApp=$pendingSourceApp")
 
         if (needsNotificationPermission()) {
-            Log.i(TAG, "Notification permission is missing. Requesting POST_NOTIFICATIONS before saving shared text.")
+            Log.i(TAG, "Notification permission is missing. Requesting POST_NOTIFICATIONS before creating shared text detail setup.")
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
             return
         }
@@ -61,43 +62,37 @@ class ShareReceiverActivity : Activity() {
         val sourceApp = pendingSourceApp
         val receivedAt = pendingReceivedAt.takeIf { it > 0L } ?: System.currentTimeMillis()
         val sessionState = app.authRepository.debugSessionState()
-        Log.i(TAG, "Share save preflight. $sessionState")
+        Log.i(TAG, "Share detail setup preflight. $sessionState")
         if (!app.authRepository.hasAppAccess()) {
-            Log.w(TAG, "Cannot save shared text because no app session is cached. $sessionState")
-            Toast.makeText(
-                this,
-                "로그인 세션이 없어 약속 정보를 저장하지 못했습니다.",
-                Toast.LENGTH_LONG,
-            ).show()
+            Log.w(TAG, "Cannot create shared text detail setup because no app session is cached. $sessionState")
+            Toast.makeText(this, "로그인이 필요합니다. 앱에서 로그인한 뒤 다시 공유해 주세요.", Toast.LENGTH_LONG).show()
             finish()
             return
         }
         app.appScope.launch {
             try {
-                Log.i(TAG, "Saving appointment schedule from shared text. textLength=${sharedText.length}, sourceApp=$sourceApp")
-                val schedule = app.repository.createScheduleFromInput(sharedText, sourceApp, receivedAt)
-                Log.i(TAG, "Appointment schedule saved. scheduleId=${schedule.id}, titleLength=${schedule.title.length}")
+                Log.i(TAG, "Creating appointment detail setup from shared text. textLength=${sharedText.length}, sourceApp=$sourceApp")
+                val candidate = app.repository.createCandidate(sharedText, sourceApp, receivedAt)
+                val notificationShown = app.notifications.showCandidate(candidate)
+                Log.i(TAG, "Appointment detail setup created. candidateId=${candidate.id}, notificationShown=$notificationShown")
                 runOnUiThread {
                     Toast.makeText(
                         this@ShareReceiverActivity,
-                        "약속을 저장했습니다.",
+                        if (notificationShown) "알림에서 제목을 입력하고 확정해 주세요." else "알림을 표시할 수 없어 앱에서 디테일을 설정해 주세요.",
                         Toast.LENGTH_LONG,
                     ).show()
+                    if (!notificationShown) startActivity(MainActivity.candidateIntent(this@ShareReceiverActivity, candidate.id))
                     finish()
                 }
             } catch (error: Throwable) {
-                Log.e(TAG, "Failed to save shared appointment text. textLength=${sharedText.length}, sourceApp=$sourceApp, ${app.authRepository.debugSessionState()}", error)
+                Log.e(TAG, "Failed to create appointment detail setup from shared text. textLength=${sharedText.length}, sourceApp=$sourceApp, ${app.authRepository.debugSessionState()}", error)
                 runOnUiThread {
-                    Toast.makeText(
-                        this@ShareReceiverActivity,
-                        "약속 정보를 저장하지 못했습니다. 로그인 또는 네트워크를 확인해 주세요.",
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    Toast.makeText(this@ShareReceiverActivity, "일정 디테일 설정을 만들지 못했습니다. 로그인 또는 네트워크를 확인해 주세요.", Toast.LENGTH_LONG).show()
                     finish()
                 }
             }
         }
-        Toast.makeText(this, "약속 정보를 확인 중입니다", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "일정 디테일 설정을 만드는 중입니다.", Toast.LENGTH_SHORT).show()
     }
 
     private fun needsNotificationPermission(): Boolean =

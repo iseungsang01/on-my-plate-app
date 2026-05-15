@@ -4,11 +4,11 @@
 
 ## 핵심 처리 흐름 요약
 
-1. `ShareReceiverActivity.onCreate` 또는 `PlannerScreen`의 직접 입력에서 공유/입력 텍스트를 받습니다.
-2. `PlannerRepository.createScheduleFromInput`이 입력 텍스트를 제목/sourceText로 보존한 개인 일정을 만들고 `planner-api` 일정 API에 저장합니다.
-3. 저장된 일정은 주간 일정 화면과 바구니의 저장 일정 섹션에서 조회됩니다.
-4. 후보 편집 경로는 기존 후보 알림/딥링크가 열릴 때만 후보 저장 처리를 담당합니다.
-5. 저장된 `ScheduleEntity`와 반복 규칙/예외는 `observeExpandedSchedules`로 주간 occurrence가 된 뒤 `PlannerWidgetSync.saveSnapshot`으로 위젯 snapshot에 반영됩니다.
+1. `ShareReceiverActivity.onCreate` or `PlannerScreen` direct input receives shared/typed appointment text.
+2. The text creates a pending `AppointmentCandidateEntity` detail setup through `PlannerRepository.createCandidate`; it is not a final schedule yet.
+3. The user opens the detail setup from the notification or basket, edits title/time/location/recurrence, and confirms it.
+4. Confirmation calls `saveFromCandidate`, writes the final personal schedule through `/api/planner/schedules`, marks the candidate confirmed, and returns to the weekly timetable.
+5. Saved `ScheduleEntity` records and recurrence data are observed by `observeExpandedSchedules` and synced to `PlannerWidgetSync.saveSnapshot`.
 
 ---
 
@@ -42,7 +42,7 @@
 - `saveAndNotify()`
   - 앱 세션, API 설정, 세션 토큰 캐시 상태를 민감정보 없이 로그로 남긴 뒤 저장을 시도합니다.
   - 앱 세션이 없으면 토스트와 로그만 남기고 `MainActivity`를 열지 않은 채 투명 공유 수신 Activity를 종료합니다.
-  - 보관된 공유 텍스트로 `PlannerRepository.createScheduleFromInput`을 호출해 개인 일정을 바로 저장합니다.
+  - Creates a pending detail setup with `PlannerRepository.createCandidate` and attempts to show an inline-title notification instead of saving a final schedule immediately.
   - 저장에 성공하면 토스트를 표시하고 앱 화면을 열지 않습니다.
   - 저장에 실패하면 오류 원인을 로그로 남기고 토스트를 표시한 뒤 앱 화면을 열지 않고 투명 공유 수신 Activity를 종료합니다.
   - 투명 공유 수신 Activity를 종료합니다.
@@ -267,7 +267,7 @@
   - Planner API save failures log the candidate payload shape and response snippet without logging the raw shared text body.
 
 - `createScheduleFromInput(rawText, sourceApp, receivedAt)`
-  - 공유/직접 입력 텍스트를 제목과 `sourceText`로 보존합니다.
+  - Legacy direct-save helper that creates a final personal schedule immediately; external share and basket input should prefer `createCandidate` so the user can configure details before confirmation.
   - 파싱과 후보 생성을 건너뛰고 수신 시각부터 1시간짜리 `planned` 개인 일정을 만듭니다.
   - `planner-api`의 `/api/planner/schedules`에 저장한 뒤 일정 목록을 새로고침합니다.
 
@@ -324,10 +324,9 @@
   - Android O 이상에서 일정 후보 채널과 충돌 채널을 생성합니다.
 
 - `showCandidate(candidate)`
-  - 알림 권한이 있으면 후보 알림을 표시합니다.
-  - 후보 알림을 실제로 게시하면 `true`, 권한/앱 알림/채널 알림 차단으로 표시할 수 없으면 `false`를 반환합니다.
-  - 파싱된 제목/시간/장소를 보여주고, inline `RemoteInput`으로 제목을 수정해 저장할 수 있는 액션을 제공합니다.
-  - 편집 화면으로 이동하는 액션도 제공합니다.
+  - Shows the pending detail setup notification when notification permission/channel state allows it.
+  - The notification title is the schedule detail setup label and it has a single inline `RemoteInput` action labeled confirm for entering the schedule title.
+  - When the notification cannot be shown, callers fall back to opening the in-app detail setup screen.
 
 - `showConflict(candidate, existing)`
   - 충돌 알림을 표시합니다.
@@ -340,10 +339,8 @@
   - 후보 입력 알림만 제거하고 충돌 알림은 유지할 때 사용합니다.
 
 - `saveAction(candidateId, status, label)`
-  - 알림에서 제목을 입력하고 저장하는 `RemoteInput` 액션을 만듭니다.
+  - Builds the inline notification `RemoteInput` confirm action that submits a title for the pending detail setup.
 
-- `editAction(candidateId, label)`
-  - 후보 편집 화면을 여는 알림 액션을 만듭니다.
 
 - `conflictAction(candidateId, actionName, label)`
   - 충돌 알림의 broadcast 액션을 만듭니다. 강제 추가/취소에 사용됩니다.
@@ -475,12 +472,10 @@
 ### `ui/PlannerScreen.kt`
 
 - `BasketScreen(repository, onOpenCandidate)`
-  - 화면 제목을 `약속 바구니`로 표시하고, 상단 문구는 입력/공유한 약속을 바로 저장한다고 안내합니다.
-  - 사용자가 약속 메시지를 직접 입력하면 `createScheduleFromInput`으로 개인 일정을 저장합니다.
-  - 저장 실패 시 실제 예외 메시지를 토스트와 카드 안의 `저장 실패` 문구로 표시합니다.
-  - 하단의 `확정한 일정` 접힘 섹션에서 `observeExpandedSchedules(rangeStart, rangeEnd)`로 저장된 일정과 반복 occurrence를 함께 표시합니다.
-  - 확정 일정 필터는 `하루`, `7일`, `한 달`, `기간`이며, `기간`은 시작일 00:00부터 종료일 다음날 00:00 전까지 조회합니다.
-  - Direct input save failures are logged, shown as a toast, and kept inside the current screen instead of escaping the coroutine.
+  - Shows the promise basket screen and explains that shared/typed appointments become detail setups before confirmation.
+  - Direct text input calls `createCandidate`, then opens the schedule detail setup screen for title/time/location confirmation.
+  - Shows pending candidates under the schedule detail setup section; selecting one opens `CandidateEditScreen`.
+  - Shows final timetable records from `observeExpandedSchedules(rangeStart, rangeEnd)`.
 
 ### `ui/ScheduleEditScreen.kt`
 
@@ -514,13 +509,10 @@
 ### `ui/CandidateEditScreen.kt`
 
 - `CandidateEditScreen(repository, candidateId, onDone, onConflict, onBack)`
-  - 후보 ID로 약속 후보를 관찰합니다.
-  - 후보의 제목, 시작/종료 날짜와 시간, 장소, 반복 없음/매일/매주/매월/맞춤 반복, 반복 종료 시각을 편집할 수 있습니다.
-  - 반복 기본값은 원문 내용과 관계없이 `반복 안함`입니다.
-  - 원문 메시지, 신뢰도 progress, 상태 선택 chip을 표시합니다.
-  - 후보가 없으면 후보를 찾을 수 없다는 안내를 표시합니다.
-  - 저장 시 먼저 `updateCandidate`로 편집 값을 반영한 뒤 반복 입력과 함께 `saveFromCandidate`를 호출합니다.
-  - 충돌이 있으면 충돌 화면으로 이동하고, 저장 성공 시 개인 일정 동기화를 요청한 뒤 완료 화면으로 이동합니다.
+  - Observes one pending `AppointmentCandidateEntity` as a schedule detail setup, not as a confirmed final schedule.
+  - Lets the user edit title, start/end time, location, and recurrence before the candidate becomes a final schedule.
+  - The primary action is confirm; it updates the candidate and calls `saveFromCandidate(..., ScheduleStatus.Confirmed, ...)`.
+  - On successful save it returns to the weekly timetable; conflicts still route to the conflict screen.
 
 - `StatusSelector(status, onStatus)`
   - `confirmed`, `planned`, `uncertain` 상태를 고르는 FilterChip row를 렌더링합니다.

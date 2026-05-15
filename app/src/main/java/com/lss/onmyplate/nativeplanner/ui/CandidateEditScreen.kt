@@ -1,4 +1,4 @@
-﻿package com.lss.onmyplate.nativeplanner.ui
+package com.lss.onmyplate.nativeplanner.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -31,13 +31,12 @@ fun CandidateEditScreen(
     var startAt by remember(candidate?.id) { mutableStateOf(candidate?.extractedStartAt) }
     var endAt by remember(candidate?.id) { mutableStateOf(candidate?.extractedEndAt) }
     var location by remember(candidate?.id) { mutableStateOf(candidate?.extractedLocation.orEmpty()) }
-    var status by remember(candidate?.id) { mutableStateOf(ScheduleStatus.Confirmed) }
     var recurrenceState by remember(candidate?.id) { mutableStateOf(RecurrenceUiState()) }
     val recurrenceInput = recurrenceState.toRecurrenceInput()
     val canSave = title.isNotBlank() && recurrenceInput != null
 
     if (candidate == null) {
-        Box(Modifier.fillMaxSize().padding(16.dp)) { Text("약속 후보를 찾을 수 없습니다.") }
+        Box(Modifier.fillMaxSize().padding(16.dp)) { Text("\uc77c\uc815 \ub514\ud14c\uc77c \uc124\uc815\uc744 \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.") }
         return
     }
 
@@ -50,8 +49,8 @@ fun CandidateEditScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onBack) { Text("← 후보") }
-            Text("약속 상세", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onBack) { Text("\u2190 \uc124\uc815 \ubaa9\ub85d") }
+            Text("\uc77c\uc815 \ub514\ud14c\uc77c \uc124\uc815", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             TextButton(onClick = {
                 scope.launch {
                     repository.discardCandidate(candidateId)
@@ -62,7 +61,7 @@ fun CandidateEditScreen(
 
         AssistChip(
             onClick = {},
-            label = { Text(if (candidate!!.timeConfidence == "high") "확정 가능" else "정보 보완 필요") },
+            label = { Text(if (candidate!!.timeConfidence == "high") "\ud655\uc815 \uc804 \uc124\uc815" else "\uc2dc\uac04 \uc815\ubcf4 \ud655\uc778 \ud544\uc694") },
             colors = AssistChipDefaults.assistChipColors(containerColor = FeedLoopColors.SuccessBg, labelColor = FeedLoopColors.Success),
             border = AssistChipDefaults.assistChipBorder(enabled = true, borderColor = FeedLoopColors.SuccessBorder),
         )
@@ -86,15 +85,13 @@ fun CandidateEditScreen(
         LinearProgressIndicator(progress = { candidate!!.confidence.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth(), color = FeedLoopColors.Success, trackColor = FeedLoopColors.BorderMuted)
         Text("${(candidate!!.confidence * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = FeedLoopColors.Secondary)
 
-        StatusSelector(status = status, onStatus = { status = it })
-
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f), border = BorderStroke(1.dp, FeedLoopColors.Border)) { Text("취소") }
             Button(
                 onClick = {
                     scope.launch {
                         repository.updateCandidate(candidateId, title, startAt, endAt, location)
-                        when (val result = repository.saveFromCandidate(candidateId, status, title, recurrenceInput = recurrenceInput ?: return@launch)) {
+                        when (val result = repository.saveFromCandidate(candidateId, ScheduleStatus.Confirmed, title, recurrenceInput = recurrenceInput ?: return@launch)) {
                             is SaveResult.Conflict -> onConflict()
                             is SaveResult.Saved -> onDone()
                             is SaveResult.SavedAsUncertain -> onDone()
@@ -105,7 +102,7 @@ fun CandidateEditScreen(
                 modifier = Modifier.weight(1.2f),
                 enabled = canSave,
                 colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
-            ) { Text("일정에 추가") }
+            ) { Text("\ud655\uc815") }
         }
     }
 }
