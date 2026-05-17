@@ -1,4 +1,4 @@
-﻿package com.lss.onmyplate.nativeplanner.ui
+package com.lss.onmyplate.nativeplanner.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -70,19 +70,23 @@ fun WeeklyScheduleScreen(repository: PlannerRepository, onOpenSchedule: (String,
                 onNextWeek = { weekOffset += 1 },
                 onOpenSchedule = onOpenSchedule,
                 onMoveSchedule = { occurrence, newStartAt ->
-                    scope.launch {
-                        val schedule = occurrence.schedule
-                        val duration = schedule.endAt?.minus(schedule.startAt)?.coerceAtLeast(30 * 60_000L)
-                        runCatching {
-                            repository.updateSchedule(
-                                scheduleId = occurrence.scheduleId,
-                                title = schedule.title,
-                                startAt = newStartAt,
-                                endAt = duration?.let { newStartAt + it },
-                                location = schedule.location,
-                                memo = schedule.memo,
-                                status = scheduleStatusFromDb(schedule.status),
-                            )
+                    if (occurrence.isRecurring) {
+                        onOpenSchedule(occurrence.scheduleId, occurrence.occurrenceStartAt)
+                    } else {
+                        scope.launch {
+                            val schedule = occurrence.schedule
+                            val duration = schedule.endAt?.minus(schedule.startAt)?.coerceAtLeast(30 * 60_000L)
+                            runCatching {
+                                repository.updateSchedule(
+                                    scheduleId = occurrence.scheduleId,
+                                    title = schedule.title,
+                                    startAt = newStartAt,
+                                    endAt = duration?.let { newStartAt + it },
+                                    location = schedule.location,
+                                    memo = schedule.memo,
+                                    status = scheduleStatusFromDb(schedule.status),
+                                )
+                            }
                         }
                     }
                 },

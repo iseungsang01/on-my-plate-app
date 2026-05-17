@@ -66,7 +66,7 @@ fun LoginScreen(authRepository: AuthRepository, onAuthenticated: () -> Unit) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("약속 바구니", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(
-                    if (isSignUp) "아이디와 비밀번호로 계정을 만들고 시작하세요." else "처음 로그인하면 계정이 자동 생성됩니다.",
+                    if (isSignUp) "아이디와 비밀번호로 계정을 만들고 시작하세요." else "기존 계정으로 로그인하세요. 계정이 없다면 회원가입을 먼저 진행하세요.",
                     color = FeedLoopColors.Secondary,
                 )
 

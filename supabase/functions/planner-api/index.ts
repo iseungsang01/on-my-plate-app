@@ -43,6 +43,9 @@ const PASSWORD_HASH_PREFIX = "pbkdf2-sha256$v1$";
 const LEGACY_SHA256_HASH_PREFIX = "sha256$v1$";
 const PASSWORD_HASH_ITERATIONS = 120_000;
 const PUBLIC_ID_PREFIX = "pb";
+const SESSION_TOKEN_PREFIX = "omp_session_v1_";
+const SESSION_TTL_DAYS = Number(Deno.env.get("PLANNER_SESSION_TTL_DAYS") ?? "30");
+const SESSION_TTL_MS = Math.max(1, SESSION_TTL_DAYS) * 24 * 60 * 60 * 1000;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -166,7 +169,7 @@ async function signUp(request: Request): Promise<Response> {
   if (error) throw apiError(500, error.message);
 
   await ensureProfile(credentials.id);
-  return authResponse(credentials.id);
+  return await authResponse(credentials.id);
 }
 
 async function login(request: Request): Promise<Response> {
@@ -179,7 +182,7 @@ async function login(request: Request): Promise<Response> {
   if (error) throw apiError(500, error.message);
 
   if (!user) {
-    return await createUserFromLogin(credentials.id, credentials.password);
+    throw apiError(401, "아이디 또는 비밀번호가 올바르지 않습니다.");
   }
 
   const matches = await verifyPassword(credentials.id, credentials.password, String(user.password_hash));
@@ -192,7 +195,7 @@ async function login(request: Request): Promise<Response> {
   }
 
   await ensureProfile(credentials.id);
-  return authResponse(credentials.id);
+  return await authResponse(credentials.id);
 }
 
 async function changePassword(request: Request): Promise<Response> {
@@ -215,22 +218,6 @@ async function changePassword(request: Request): Promise<Response> {
 
   await updatePasswordHash(userId, newPassword);
   return jsonResponse({ ok: true });
-}
-
-async function createUserFromLogin(id: string, password: string): Promise<Response> {
-  const passwordHash = await hashPassword(id, password);
-  const { error } = await db.from("planner_users").insert({ id, password_hash: passwordHash });
-  if (error?.code === "23505") {
-    const retryRequest = new Request("http://local/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ id, password }),
-    });
-    return await login(retryRequest);
-  }
-  if (error) throw apiError(500, error.message);
-
-  await ensureProfile(id);
-  return authResponse(id);
 }
 
 async function readCredentials(request: Request): Promise<{ id: string; password: string }> {
@@ -307,8 +294,34 @@ function toHex(buffer: ArrayBuffer): string {
     .join("");
 }
 
-function authResponse(id: string): Response {
-  return jsonResponse({ sessionToken: id, userId: id });
+async function authResponse(id: string): Promise<Response> {
+  const token = createSessionToken();
+  const tokenHash = await hashSessionToken(token);
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
+  const { error } = await db.from("planner_sessions").insert({
+    user_id: id,
+    token_hash: tokenHash,
+    expires_at: expiresAt,
+  });
+  if (error) throw apiError(500, error.message);
+  return jsonResponse({ sessionToken: token, userId: id, expiresAt });
+}
+
+function createSessionToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return `${SESSION_TOKEN_PREFIX}${base64Url(bytes)}`;
+}
+
+async function hashSessionToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return toHex(digest);
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 async function profile(userId: string): Promise<Response> {
@@ -581,7 +594,7 @@ async function candidateForUser(userId: string, candidateId: string): Promise<Re
 async function submitFeedback(request: Request): Promise<Response> {
   const payload = readFeedbackPayload(await readJson(request));
   const { error } = await db.from("planner_feedback").insert({
-    user_id: optionalUserId(request),
+    user_id: await optionalUserId(request),
     message: payload.message,
     source_screen: payload.sourceScreen,
     app_version_name: payload.appVersionName,
@@ -699,27 +712,47 @@ async function requireGroupMember(userId: string, groupId: string): Promise<void
 }
 
 async function requireUserId(request: Request): Promise<string> {
-  const header = request.headers.get("authorization") ?? "";
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match) throw apiError(401, "로그인이 필요합니다.");
-
-  const userId = normalizeIdentifier(match[1].trim());
-  const { data, error } = await db
-    .from("planner_users")
-    .select("id")
-    .eq("id", userId)
-    .maybeSingle();
-  if (error) throw apiError(500, error.message);
-  if (!data) throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
+  const userId = await userIdFromSession(request, true);
+  if (!userId) throw apiError(401, "로그인이 필요합니다.");
   return userId;
 }
 
-function optionalUserId(request: Request): string | null {
+async function optionalUserId(request: Request): Promise<string | null> {
+  return await userIdFromSession(request, false);
+}
+
+async function userIdFromSession(request: Request, required: boolean): Promise<string | null> {
   const header = request.headers.get("authorization") ?? "";
-  if (!header.trim()) return null;
+  if (!header.trim()) {
+    if (required) throw apiError(401, "로그인이 필요합니다.");
+    return null;
+  }
   const match = header.match(/^Bearer\s+(.+)$/i);
   if (!match) throw apiError(401, "로그인이 필요합니다.");
-  return normalizeIdentifier(match[1].trim());
+
+  const token = match[1].trim();
+  if (!token.startsWith(SESSION_TOKEN_PREFIX)) {
+    throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
+  }
+
+  const tokenHash = await hashSessionToken(token);
+  const { data: session, error } = await db
+    .from("planner_sessions")
+    .select("user_id,expires_at,revoked_at")
+    .eq("token_hash", tokenHash)
+    .maybeSingle();
+
+  if (error) throw apiError(500, error.message);
+  if (!session || session.revoked_at) {
+    throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
+  }
+
+  const expiresAt = Date.parse(String(session.expires_at));
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
+  }
+
+  return String(session.user_id);
 }
 
 async function readSchedulePayload(request: Request): Promise<SchedulePayload> {

@@ -252,7 +252,7 @@ private enum class CandidateSaveMode {
 }
 
 private fun AppointmentCandidateEntity?.defaultSaveMode(): CandidateSaveMode =
-    if (this?.extractedTitle.isNullOrBlank()) CandidateSaveMode.Uncertain else CandidateSaveMode.Confirmed
+    if (this?.extractedStartAt != null) CandidateSaveMode.Confirmed else CandidateSaveMode.Uncertain
 
 private fun parseSourceLabel(parseSource: String): String = when (parseSource) {
     AppointmentParseSourceValues.LlmSuccess,

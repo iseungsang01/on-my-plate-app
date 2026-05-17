@@ -12,6 +12,15 @@ create table if not exists public.planner_users (
     check (id ~ '^[A-Za-z0-9._-]{3,40}$')
 );
 
+create table if not exists public.planner_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references public.planner_users(id) on delete cascade,
+  token_hash text not null unique,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  revoked_at timestamptz
+);
+
 create table if not exists public.planner_profiles (
   user_id text primary key,
   public_id text not null unique,
@@ -122,6 +131,11 @@ create table if not exists public.planner_dummy_schedules (
   updated_at timestamptz not null default now()
 );
 
+create index if not exists planner_sessions_user_id_idx on public.planner_sessions(user_id);
+create index if not exists planner_sessions_token_hash_idx on public.planner_sessions(token_hash);
+create index if not exists planner_sessions_active_idx
+  on public.planner_sessions(token_hash, expires_at)
+  where revoked_at is null;
 create index if not exists planner_profiles_public_id_idx on public.planner_profiles(public_id);
 create index if not exists planner_group_members_user_id_idx on public.planner_group_members(user_id);
 create index if not exists planner_schedules_group_start_idx on public.planner_schedules(group_id, start_at);
@@ -131,6 +145,7 @@ create index if not exists planner_personal_schedule_recurrence_exceptions_sched
 create index if not exists planner_dummy_schedules_group_start_idx on public.planner_dummy_schedules(group_id, start_at);
 
 alter table public.planner_users enable row level security;
+alter table public.planner_sessions enable row level security;
 alter table public.planner_profiles enable row level security;
 alter table public.planner_groups enable row level security;
 alter table public.planner_group_members enable row level security;
@@ -165,6 +180,7 @@ drop policy if exists "creators delete dummy schedules" on public.planner_dummy_
 -- login, membership, and ownership checks before using its server-only
 -- service_role credentials.
 revoke all on public.planner_users from anon, authenticated;
+revoke all on public.planner_sessions from anon, authenticated;
 revoke all on public.planner_profiles from anon, authenticated;
 revoke all on public.planner_groups from anon, authenticated;
 revoke all on public.planner_group_members from anon, authenticated;
@@ -177,6 +193,7 @@ revoke all on public.planner_personal_schedule_recurrence_exceptions from anon, 
 revoke all on public.planner_dummy_schedules from anon, authenticated;
 
 grant all on public.planner_users to service_role;
+grant all on public.planner_sessions to service_role;
 grant all on public.planner_profiles to service_role;
 grant all on public.planner_groups to service_role;
 grant all on public.planner_group_members to service_role;

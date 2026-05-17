@@ -1,0 +1,363 @@
+[1mdiff --git a/app/src/main/java/com/lss/onmyplate/nativeplanner/notification/AppointmentNotificationManager.kt b/app/src/main/java/com/lss/onmyplate/nativeplanner/notification/AppointmentNotificationManager.kt[m
+[1mindex 8176573..ebd9cd3 100644[m
+[1m--- a/app/src/main/java/com/lss/onmyplate/nativeplanner/notification/AppointmentNotificationManager.kt[m
+[1m+++ b/app/src/main/java/com/lss/onmyplate/nativeplanner/notification/AppointmentNotificationManager.kt[m
+[36m@@ -97,6 +97,27 @@[m [mclass AppointmentNotificationManager(private val context: Context) {[m
+         notificationManager.cancel(candidateId.hashCode())[m
+     }[m
+ [m
+[32m+[m[32m    fun showActionFailed(candidateId: String, message: String = "일정 저장에 실패했습니다. 앱에서 다시 시도해 주세요.") {[m
+[32m+[m[32m        if (!canNotify(CHANNEL_APPOINTMENTS)) return[m
+[32m+[m[32m        val contentIntent = PendingIntent.getActivity([m
+[32m+[m[32m            context,[m
+[32m+[m[32m            (candidateId + "failed").hashCode(),[m
+[32m+[m[32m            MainActivity.candidateIntent(context, candidateId),[m
+[32m+[m[32m            immutablePendingFlags(),[m
+[32m+[m[32m        )[m
+[32m+[m[32m        val notification = NotificationCompat.Builder(context, CHANNEL_APPOINTMENTS)[m
+[32m+[m[32m            .setSmallIcon(R.drawable.ic_stat_calendar)[m
+[32m+[m[32m            .setContentTitle("일정 저장 실패")[m
+[32m+[m[32m            .setContentText(message)[m
+[32m+[m[32m            .setStyle(NotificationCompat.BigTextStyle().bigText("$message\n앱을 열어 내용을 확인한 뒤 다시 저장해 주세요."))[m
+[32m+[m[32m            .setContentIntent(contentIntent)[m
+[32m+[m[32m            .setPriority(NotificationCompat.PRIORITY_HIGH)[m
+[32m+[m[32m            .setCategory(NotificationCompat.CATEGORY_ERROR)[m
+[32m+[m[32m            .setAutoCancel(true)[m
+[32m+[m[32m            .build()[m
+[32m+[m[32m        notificationManager.notify((candidateId + "failed").hashCode(), notification)[m
+[32m+[m[32m    }[m
+[32m+[m
+     private fun saveAction([m
+         candidateId: String,[m
+         status: ScheduleStatus,[m
+[1mdiff --git a/app/src/main/java/com/lss/onmyplate/nativeplanner/notification/NotificationActionReceiver.kt b/app/src/main/java/com/lss/onmyplate/nativeplanner/notification/NotificationActionReceiver.kt[m
+[1mindex 15f5cc7..818cdb2 100644[m
+[1m--- a/app/src/main/java/com/lss/onmyplate/nativeplanner/notification/NotificationActionReceiver.kt[m
+[1m+++ b/app/src/main/java/com/lss/onmyplate/nativeplanner/notification/NotificationActionReceiver.kt[m
+[36m@@ -20,8 +20,9 @@[m [mclass NotificationActionReceiver : BroadcastReceiver() {[m
+         val pending = goAsync()[m
+         val app = context.applicationContext as OnMyPlateApp[m
+         app.appScope.launch {[m
+[32m+[m[32m            var candidateId: String? = null[m
+             try {[m
+[31m-                val candidateId = intent.getStringExtra(EXTRA_CANDIDATE_ID) ?: return@launch[m
+[32m+[m[32m                candidateId = intent.getStringExtra(EXTRA_CANDIDATE_ID) ?: return@launch[m
+                 var keepConflictNotification = false[m
+                 when (intent.action) {[m
+                     ACTION_SAVE -> keepConflictNotification = handleSave(app, intent, candidateId)[m
+[36m@@ -33,6 +34,14 @@[m [mclass NotificationActionReceiver : BroadcastReceiver() {[m
+                 } else {[m
+                     app.notifications.cancelCandidate(candidateId)[m
+                 }[m
+[32m+[m[32m            } catch (error: Throwable) {[m
+[32m+[m[32m                candidateId?.let {[m
+[32m+[m[32m                    app.notifications.showActionFailed([m
+[32m+[m[32m                        candidateId = it,[m
+[32m+[m[32m                        message = error.message?.takeIf { message -> message.isNotBlank() }[m
+[32m+[m[32m                            ?: "일정 저장에 실패했습니다. 네트워크와 로그인 상태를 확인해 주세요.",[m
+[32m+[m[32m                    )[m
+[32m+[m[32m                }[m
+             } finally {[m
+                 pending.finish()[m
+             }[m
+[1mdiff --git a/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/CandidateEditScreen.kt b/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/CandidateEditScreen.kt[m
+[1mindex 34945bc..b3ad09c 100644[m
+[1m--- a/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/CandidateEditScreen.kt[m
+[1m+++ b/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/CandidateEditScreen.kt[m
+[36m@@ -252,7 +252,7 @@[m [mprivate enum class CandidateSaveMode {[m
+ }[m
+ [m
+ private fun AppointmentCandidateEntity?.defaultSaveMode(): CandidateSaveMode =[m
+[31m-    if (this?.extractedTitle.isNullOrBlank()) CandidateSaveMode.Uncertain else CandidateSaveMode.Confirmed[m
+[32m+[m[32m    if (this?.extractedStartAt != null) CandidateSaveMode.Confirmed else CandidateSaveMode.Uncertain[m
+ [m
+ private fun parseSourceLabel(parseSource: String): String = when (parseSource) {[m
+     AppointmentParseSourceValues.LlmSuccess,[m
+[1mdiff --git a/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/LoginScreen.kt b/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/LoginScreen.kt[m
+[1mindex 9c6fce9..9b32675 100644[m
+[1m--- a/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/LoginScreen.kt[m
+[1m+++ b/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/LoginScreen.kt[m
+[36m@@ -66,7 +66,7 @@[m [mfun LoginScreen(authRepository: AuthRepository, onAuthenticated: () -> Unit) {[m
+             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {[m
+                 Text("약속 바구니", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)[m
+                 Text([m
+[31m-                    if (isSignUp) "아이디와 비밀번호로 계정을 만들고 시작하세요." else "처음 로그인하면 계정이 자동 생성됩니다.",[m
+[32m+[m[32m                    if (isSignUp) "아이디와 비밀번호로 계정을 만들고 시작하세요." else "기존 계정으로 로그인하세요. 계정이 없다면 회원가입을 먼저 진행하세요.",[m
+                     color = FeedLoopColors.Secondary,[m
+                 )[m
+ [m
+[1mdiff --git a/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/WeeklyScheduleScreen.kt b/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/WeeklyScheduleScreen.kt[m
+[1mindex 15017f2..dec5255 100644[m
+[1m--- a/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/WeeklyScheduleScreen.kt[m
+[1m+++ b/app/src/main/java/com/lss/onmyplate/nativeplanner/ui/WeeklyScheduleScreen.kt[m
+[36m@@ -1,4 +1,4 @@[m
+[31m-﻿package com.lss.onmyplate.nativeplanner.ui[m
+[32m+[m[32mpackage com.lss.onmyplate.nativeplanner.ui[m
+ [m
+ import androidx.compose.foundation.BorderStroke[m
+ import androidx.compose.foundation.background[m
+[36m@@ -70,19 +70,23 @@[m [mfun WeeklyScheduleScreen(repository: PlannerRepository, onOpenSchedule: (String,[m
+                 onNextWeek = { weekOffset += 1 },[m
+                 onOpenSchedule = onOpenSchedule,[m
+                 onMoveSchedule = { occurrence, newStartAt ->[m
+[31m-                    scope.launch {[m
+[31m-                        val schedule = occurrence.schedule[m
+[31m-                        val duration = schedule.endAt?.minus(schedule.startAt)?.coerceAtLeast(30 * 60_000L)[m
+[31m-                        runCatching {[m
+[31m-                            repository.updateSchedule([m
+[31m-                                scheduleId = occurrence.scheduleId,[m
+[31m-                                title = schedule.title,[m
+[31m-                                startAt = newStartAt,[m
+[31m-                                endAt = duration?.let { newStartAt + it },[m
+[31m-                                location = schedule.location,[m
+[31m-                                memo = schedule.memo,[m
+[31m-                                status = scheduleStatusFromDb(schedule.status),[m
+[31m-                            )[m
+[32m+[m[32m                    if (occurrence.isRecurring) {[m
+[32m+[m[32m                        onOpenSchedule(occurrence.scheduleId, occurrence.occurrenceStartAt)[m
+[32m+[m[32m                    } else {[m
+[32m+[m[32m                        scope.launch {[m
+[32m+[m[32m                            val schedule = occurrence.schedule[m
+[32m+[m[32m                            val duration = schedule.endAt?.minus(schedule.startAt)?.coerceAtLeast(30 * 60_000L)[m
+[32m+[m[32m                            runCatching {[m
+[32m+[m[32m                                repository.updateSchedule([m
+[32m+[m[32m                                    scheduleId = occurrence.scheduleId,[m
+[32m+[m[32m                                    title = schedule.title,[m
+[32m+[m[32m                                    startAt = newStartAt,[m
+[32m+[m[32m                                    endAt = duration?.let { newStartAt + it },[m
+[32m+[m[32m                                    location = schedule.location,[m
+[32m+[m[32m                                    memo = schedule.memo,[m
+[32m+[m[32m                                    status = scheduleStatusFromDb(schedule.status),[m
+[32m+[m[32m                                )[m
+[32m+[m[32m                            }[m
+                         }[m
+                     }[m
+                 },[m
+[1mdiff --git a/docs/supabaseSQL.md b/docs/supabaseSQL.md[m
+[1mindex 3eb5c53..bf18367 100644[m
+[1m--- a/docs/supabaseSQL.md[m
+[1m+++ b/docs/supabaseSQL.md[m
+[36m@@ -12,6 +12,15 @@[m [mcreate table if not exists public.planner_users ([m
+     check (id ~ '^[A-Za-z0-9._-]{3,40}$')[m
+ );[m
+ [m
+[32m+[m[32mcreate table if not exists public.planner_sessions ([m
+[32m+[m[32m  id uuid primary key default gen_random_uuid(),[m
+[32m+[m[32m  user_id text not null references public.planner_users(id) on delete cascade,[m
+[32m+[m[32m  token_hash text not null unique,[m
+[32m+[m[32m  created_at timestamptz not null default now(),[m
+[32m+[m[32m  expires_at timestamptz not null,[m
+[32m+[m[32m  revoked_at timestamptz[m
+[32m+[m[32m);[m
+[32m+[m
+ create table if not exists public.planner_profiles ([m
+   user_id text primary key,[m
+   public_id text not null unique,[m
+[36m@@ -122,6 +131,11 @@[m [mcreate table if not exists public.planner_dummy_schedules ([m
+   updated_at timestamptz not null default now()[m
+ );[m
+ [m
+[32m+[m[32mcreate index if not exists planner_sessions_user_id_idx on public.planner_sessions(user_id);[m
+[32m+[m[32mcreate index if not exists planner_sessions_token_hash_idx on public.planner_sessions(token_hash);[m
+[32m+[m[32mcreate index if not exists planner_sessions_active_idx[m
+[32m+[m[32m  on public.planner_sessions(token_hash, expires_at)[m
+[32m+[m[32m  where revoked_at is null;[m
+ create index if not exists planner_profiles_public_id_idx on public.planner_profiles(public_id);[m
+ create index if not exists planner_group_members_user_id_idx on public.planner_group_members(user_id);[m
+ create index if not exists planner_schedules_group_start_idx on public.planner_schedules(group_id, start_at);[m
+[36m@@ -131,6 +145,7 @@[m [mcreate index if not exists planner_personal_schedule_recurrence_exceptions_sched[m
+ create index if not exists planner_dummy_schedules_group_start_idx on public.planner_dummy_schedules(group_id, start_at);[m
+ [m
+ alter table public.planner_users enable row level security;[m
+[32m+[m[32malter table public.planner_sessions enable row level security;[m
+ alter table public.planner_profiles enable row level security;[m
+ alter table public.planner_groups enable row level security;[m
+ alter table public.planner_group_members enable row level security;[m
+[36m@@ -165,6 +180,7 @@[m [mdrop policy if exists "creators delete dummy schedules" on public.planner_dummy_[m
+ -- login, membership, and ownership checks before using its server-only[m
+ -- service_role credentials.[m
+ revoke all on public.planner_users from anon, authenticated;[m
+[32m+[m[32mrevoke all on public.planner_sessions from anon, authenticated;[m
+ revoke all on public.planner_profiles from anon, authenticated;[m
+ revoke all on public.planner_groups from anon, authenticated;[m
+ revoke all on public.planner_group_members from anon, authenticated;[m
+[36m@@ -177,6 +193,7 @@[m [mrevoke all on public.planner_personal_schedule_recurrence_exceptions from anon,[m
+ revoke all on public.planner_dummy_schedules from anon, authenticated;[m
+ [m
+ grant all on public.planner_users to service_role;[m
+[32m+[m[32mgrant all on public.planner_sessions to service_role;[m
+ grant all on public.planner_profiles to service_role;[m
+ grant all on public.planner_groups to service_role;[m
+ grant all on public.planner_group_members to service_role;[m
+[1mdiff --git a/supabase/functions/planner-api/index.ts b/supabase/functions/planner-api/index.ts[m
+[1mindex bd8ed0d..83013fe 100644[m
+[1m--- a/supabase/functions/planner-api/index.ts[m
+[1m+++ b/supabase/functions/planner-api/index.ts[m
+[36m@@ -43,6 +43,9 @@[m [mconst PASSWORD_HASH_PREFIX = "pbkdf2-sha256$v1$";[m
+ const LEGACY_SHA256_HASH_PREFIX = "sha256$v1$";[m
+ const PASSWORD_HASH_ITERATIONS = 120_000;[m
+ const PUBLIC_ID_PREFIX = "pb";[m
+[32m+[m[32mconst SESSION_TOKEN_PREFIX = "omp_session_v1_";[m
+[32m+[m[32mconst SESSION_TTL_DAYS = Number(Deno.env.get("PLANNER_SESSION_TTL_DAYS") ?? "30");[m
+[32m+[m[32mconst SESSION_TTL_MS = Math.max(1, SESSION_TTL_DAYS) * 24 * 60 * 60 * 1000;[m
+ [m
+ const corsHeaders = {[m
+   "Access-Control-Allow-Origin": "*",[m
+[36m@@ -166,7 +169,7 @@[m [masync function signUp(request: Request): Promise<Response> {[m
+   if (error) throw apiError(500, error.message);[m
+ [m
+   await ensureProfile(credentials.id);[m
+[31m-  return authResponse(credentials.id);[m
+[32m+[m[32m  return await authResponse(credentials.id);[m
+ }[m
+ [m
+ async function login(request: Request): Promise<Response> {[m
+[36m@@ -179,7 +182,7 @@[m [masync function login(request: Request): Promise<Response> {[m
+   if (error) throw apiError(500, error.message);[m
+ [m
+   if (!user) {[m
+[31m-    return await createUserFromLogin(credentials.id, credentials.password);[m
+[32m+[m[32m    throw apiError(401, "아이디 또는 비밀번호가 올바르지 않습니다.");[m
+   }[m
+ [m
+   const matches = await verifyPassword(credentials.id, credentials.password, String(user.password_hash));[m
+[36m@@ -192,7 +195,7 @@[m [masync function login(request: Request): Promise<Response> {[m
+   }[m
+ [m
+   await ensureProfile(credentials.id);[m
+[31m-  return authResponse(credentials.id);[m
+[32m+[m[32m  return await authResponse(credentials.id);[m
+ }[m
+ [m
+ async function changePassword(request: Request): Promise<Response> {[m
+[36m@@ -217,22 +220,6 @@[m [masync function changePassword(request: Request): Promise<Response> {[m
+   return jsonResponse({ ok: true });[m
+ }[m
+ [m
+[31m-async function createUserFromLogin(id: string, password: string): Promise<Response> {[m
+[31m-  const passwordHash = await hashPassword(id, password);[m
+[31m-  const { error } = await db.from("planner_users").insert({ id, password_hash: passwordHash });[m
+[31m-  if (error?.code === "23505") {[m
+[31m-    const retryRequest = new Request("http://local/api/auth/login", {[m
+[31m-      method: "POST",[m
+[31m-      body: JSON.stringify({ id, password }),[m
+[31m-    });[m
+[31m-    return await login(retryRequest);[m
+[31m-  }[m
+[31m-  if (error) throw apiError(500, error.message);[m
+[31m-[m
+[31m-  await ensureProfile(id);[m
+[31m-  return authResponse(id);[m
+[31m-}[m
+[31m-[m
+ async function readCredentials(request: Request): Promise<{ id: string; password: string }> {[m
+   const body = await readJson(request);[m
+   const id = normalizeIdentifier(body.id);[m
+[36m@@ -307,8 +294,34 @@[m [mfunction toHex(buffer: ArrayBuffer): string {[m
+     .join("");[m
+ }[m
+ [m
+[31m-function authResponse(id: string): Response {[m
+[31m-  return jsonResponse({ sessionToken: id, userId: id });[m
+[32m+[m[32masync function authResponse(id: string): Promise<Response> {[m
+[32m+[m[32m  const token = createSessionToken();[m
+[32m+[m[32m  const tokenHash = await hashSessionToken(token);[m
+[32m+[m[32m  const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();[m
+[32m+[m[32m  const { error } = await db.from("planner_sessions").insert({[m
+[32m+[m[32m    user_id: id,[m
+[32m+[m[32m    token_hash: tokenHash,[m
+[32m+[m[32m    expires_at: expiresAt,[m
+[32m+[m[32m  });[m
+[32m+[m[32m  if (error) throw apiError(500, error.message);[m
+[32m+[m[32m  return jsonResponse({ sessionToken: token, userId: id, expiresAt });[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction createSessionToken(): string {[m
+[32m+[m[32m  const bytes = new Uint8Array(32);[m
+[32m+[m[32m  crypto.getRandomValues(bytes);[m
+[32m+[m[32m  return `${SESSION_TOKEN_PREFIX}${base64Url(bytes)}`;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function hashSessionToken(token: string): Promise<string> {[m
+[32m+[m[32m  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));[m
+[32m+[m[32m  return toHex(digest);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction base64Url(bytes: Uint8Array): string {[m
+[32m+[m[32m  let binary = "";[m
+[32m+[m[32m  for (const byte of bytes) binary += String.fromCharCode(byte);[m
+[32m+[m[32m  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");[m
+ }[m
+ [m
+ async function profile(userId: string): Promise<Response> {[m
+[36m@@ -581,7 +594,7 @@[m [masync function candidateForUser(userId: string, candidateId: string): Promise<Re[m
+ async function submitFeedback(request: Request): Promise<Response> {[m
+   const payload = readFeedbackPayload(await readJson(request));[m
+   const { error } = await db.from("planner_feedback").insert({[m
+[31m-    user_id: optionalUserId(request),[m
+[32m+[m[32m    user_id: await optionalUserId(request),[m
+     message: payload.message,[m
+     source_screen: payload.sourceScreen,[m
+     app_version_name: payload.appVersionName,[m
+[36m@@ -699,27 +712,47 @@[m [masync function requireGroupMember(userId: string, groupId: string): Promise<void[m
+ }[m
+ [m
+ async function requireUserId(request: Request): Promise<string> {[m
+[32m+[m[32m  const userId = await userIdFromSession(request, true);[m
+[32m+[m[32m  if (!userId) throw apiError(401, "로그인이 필요합니다.");[m
+[32m+[m[32m  return userId;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function optionalUserId(request: Request): Promise<string | null> {[m
+[32m+[m[32m  return await userIdFromSession(request, false);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function userIdFromSession(request: Request, required: boolean): Promise<string | null> {[m
+   const header = request.headers.get("authorization") ?? "";[m
+[32m+[m[32m  if (!header.trim()) {[m
+[32m+[m[32m    if (required) throw apiError(401, "로그인이 필요합니다.");[m
+[32m+[m[32m    return null;[m
+[32m+[m[32m  }[m
+   const match = header.match(/^Bearer\s+(.+)$/i);[m
+   if (!match) throw apiError(401, "로그인이 필요합니다.");[m
+ [m
+[31m-  const userId = normalizeIdentifier(match[1].trim());[m
+[31m-  const { data, error } = await db[m
+[31m-    .from("planner_users")[m
+[31m-    .select("id")[m
+[31m-    .eq("id", userId)[m
+[32m+[m[32m  const token = match[1].trim();[m
+[32m+[m[32m  if (!token.startsWith(SESSION_TOKEN_PREFIX)) {[m
+[32m+[m[32m    throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const tokenHash = await hashSessionToken(token);[m
+[32m+[m[32m  const { data: session, error } = await db[m
+[32m+[m[32m    .from("planner_sessions")[m
+[32m+[m[32m    .select("user_id,expires_at,revoked_at")[m
+[32m+[m[32m    .eq("token_hash", tokenHash)[m
+     .maybeSingle();[m
+[32m+[m
+   if (error) throw apiError(500, error.message);[m
+[31m-  if (!data) throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");[m
+[31m-  return userId;[m
+[31m-}[m
+[32m+[m[32m  if (!session || session.revoked_at) {[m
+[32m+[m[32m    throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");[m
+[32m+[m[32m  }[m
+ [m
+[31m-function optionalUserId(request: Request): string | null {[m
+[31m-  const header = request.headers.get("authorization") ?? "";[m
+[31m-  if (!header.trim()) return null;[m
+[31m-  const match = header.match(/^Bearer\s+(.+)$/i);[m
+[31m-  if (!match) throw apiError(401, "로그인이 필요합니다.");[m
+[31m-  return normalizeIdentifier(match[1].trim());[m
+[32m+[m[32m  const expiresAt = Date.parse(String(session.expires_at));[m
+[32m+[m[32m  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {[m
+[32m+[m[32m    throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return String(session.user_id);[m
+ }[m
+ [m
+ async function readSchedulePayload(request: Request): Promise<SchedulePayload> {[m

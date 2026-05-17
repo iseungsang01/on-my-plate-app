@@ -97,6 +97,27 @@ class AppointmentNotificationManager(private val context: Context) {
         notificationManager.cancel(candidateId.hashCode())
     }
 
+    fun showActionFailed(candidateId: String, message: String = "일정 저장에 실패했습니다. 앱에서 다시 시도해 주세요.") {
+        if (!canNotify(CHANNEL_APPOINTMENTS)) return
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            (candidateId + "failed").hashCode(),
+            MainActivity.candidateIntent(context, candidateId),
+            immutablePendingFlags(),
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_APPOINTMENTS)
+            .setSmallIcon(R.drawable.ic_stat_calendar)
+            .setContentTitle("일정 저장 실패")
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$message\n앱을 열어 내용을 확인한 뒤 다시 저장해 주세요."))
+            .setContentIntent(contentIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setAutoCancel(true)
+            .build()
+        notificationManager.notify((candidateId + "failed").hashCode(), notification)
+    }
+
     private fun saveAction(
         candidateId: String,
         status: ScheduleStatus,

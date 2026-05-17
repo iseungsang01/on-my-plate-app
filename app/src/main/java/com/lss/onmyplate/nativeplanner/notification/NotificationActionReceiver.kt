@@ -20,8 +20,9 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val pending = goAsync()
         val app = context.applicationContext as OnMyPlateApp
         app.appScope.launch {
+            var candidateId: String? = null
             try {
-                val candidateId = intent.getStringExtra(EXTRA_CANDIDATE_ID) ?: return@launch
+                candidateId = intent.getStringExtra(EXTRA_CANDIDATE_ID) ?: return@launch
                 var keepConflictNotification = false
                 when (intent.action) {
                     ACTION_SAVE -> keepConflictNotification = handleSave(app, intent, candidateId)
@@ -32,6 +33,14 @@ class NotificationActionReceiver : BroadcastReceiver() {
                     app.notifications.cancelCandidatePrompt(candidateId)
                 } else {
                     app.notifications.cancelCandidate(candidateId)
+                }
+            } catch (error: Throwable) {
+                candidateId?.let {
+                    app.notifications.showActionFailed(
+                        candidateId = it,
+                        message = error.message?.takeIf { message -> message.isNotBlank() }
+                            ?: "일정 저장에 실패했습니다. 네트워크와 로그인 상태를 확인해 주세요.",
+                    )
                 }
             } finally {
                 pending.finish()
