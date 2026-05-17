@@ -311,7 +311,7 @@
   - 특정 반복 occurrence를 건너뛰는 예외를 저장합니다.
 
 - `deleteSchedule(scheduleId)`
-  - Calls `DELETE /api/planner/schedules/{id}` to remove the signed-in user's whole personal schedule.
+  - Calls `DELETE /api/planner/schedules/{id}` to remove the signed-in user's whole personal schedule, including its recurrence rule and recurrence exceptions on the backend.
   - Removes the schedule id directly from `scheduleRecords` after DELETE succeeds, then attempts a schedule refresh so weekly observers drop it immediately.
 
 - `discardCandidate(candidateId)`
@@ -772,7 +772,7 @@
 - `listPersonalSchedules(userId)` / `getPersonalSchedule(userId, scheduleId)` / `updatePersonalSchedule(userId, scheduleId, request)` / `deletePersonalSchedule(userId, scheduleId)`
   - 로그인 사용자가 소유한 개인 일정 목록/단건 조회와 PATCH 수정을 처리하고 반복 metadata를 응답에 포함합니다.
 
-  - DELETE removes the whole personal schedule and returns `{ ok: true }`; read/update responses include recurrence metadata.
+  - DELETE removes the whole personal schedule plus its personal recurrence rule/exceptions atomically through `delete_personal_schedule`, and returns `{ ok: true }`; read/update responses include recurrence metadata.
 
 - `addPersonalScheduleRecurrenceException(userId, scheduleId, request)`
   - 로그인 사용자가 소유한 반복 일정 occurrence skip 예외를 저장합니다.

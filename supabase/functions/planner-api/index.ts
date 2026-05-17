@@ -464,12 +464,15 @@ async function updatePersonalSchedule(userId: string, scheduleId: string, reques
 
 async function deletePersonalSchedule(userId: string, scheduleId: string): Promise<Response> {
   await personalScheduleForUser(userId, scheduleId);
-  const { error } = await db
-    .from("planner_personal_schedules")
-    .delete()
-    .eq("id", scheduleId)
-    .eq("created_by", userId);
+  const { data, error } = await db.rpc("delete_personal_schedule", {
+    p_user_id: userId,
+    p_schedule_id: scheduleId,
+  });
   if (error) throw apiError(500, error.message);
+  if (data !== true) {
+    await personalScheduleForUser(userId, scheduleId);
+    throw apiError(500, "Personal schedule delete did not affect a row.");
+  }
   return jsonResponse({ ok: true });
 }
 
