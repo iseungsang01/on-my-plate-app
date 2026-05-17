@@ -358,8 +358,8 @@ private fun SavedScheduleRow(occurrence: ScheduleOccurrence) {
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
             .background(FeedLoopColors.Tertiary.copy(alpha = 0.55f))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -372,10 +372,11 @@ private fun SavedScheduleRow(occurrence: ScheduleOccurrence) {
             )
             if (occurrence.isRecurring) AssistChip(onClick = {}, label = { Text("반복") })
         }
-        Text(formatDateTime(occurrence.occurrenceStartAt), color = FeedLoopColors.Secondary, style = MaterialTheme.typography.bodySmall)
-        schedule.location?.takeIf { it.isNotBlank() }?.let {
-            Text(it, color = FeedLoopColors.Secondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        val metadata = listOfNotNull(
+            formatDateTime(occurrence.occurrenceStartAt).takeIf { it.isNotBlank() },
+            schedule.location?.takeIf { it.isNotBlank() },
+        ).joinToString(" · ")
+        Text(metadata, color = FeedLoopColors.Secondary, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

@@ -22,7 +22,10 @@ object PlannerWidgetSync {
         val appContext = context.applicationContext
         syncScope.launch {
             val app = appContext as? OnMyPlateApp
-            if (app == null || !app.authRepository.hasSession()) {
+            if (app == null) {
+                return@launch
+            }
+            if (!app.authRepository.hasSession()) {
                 clearSnapshot(appContext)
                 return@launch
             }
@@ -41,7 +44,7 @@ object PlannerWidgetSync {
         saveSnapshot(context, emptyList())
     }
 
-    fun saveSnapshot(context: Context, schedules: List<ScheduleOccurrence>) {
+    fun saveSnapshot(context: Context, schedules: List<ScheduleOccurrence>, refreshWidgets: Boolean = true) {
         // Native MVP scope: the Android app exports the signed-in user's personal schedules.
         // The reusable widget bundle under widget/ can additionally provide auto/category plans,
         // but this native snapshot intentionally exports manualEventsByDate only.
@@ -73,6 +76,6 @@ object PlannerWidgetSync {
             .put("viewportEndMinute", 24 * 60)
             .put("manualEventsByDate", manualEventsByDate)
 
-        PlannerWidgetStore.saveSummarySnapshot(context.applicationContext, snapshot.toString())
+        PlannerWidgetStore.saveSummarySnapshot(context.applicationContext, snapshot.toString(), refreshWidgets)
     }
 }

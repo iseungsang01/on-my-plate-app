@@ -63,14 +63,21 @@
 ### `domain/parser/KoreanAppointmentParser.kt`
 
 - `parse(rawText, receivedAt)`
-  - 로컬 파싱 결과를 먼저 만들고, 설정에 따라 LLM 결과를 우선하거나 보조 fallback으로 병합합니다.
-  - `preferLlm=true`이면 LLM 결과를 우선 사용하되 누락 필드는 로컬 결과로 채웁니다.
-  - 로컬 결과의 시작 시각과 신뢰도가 충분하면 LLM 없이 로컬 결과를 반환할 수 있습니다.
+  - Returns the `AppointmentParseResult` from `parseWithOutcome(rawText, receivedAt)` for compatibility.
+
+- `parseWithOutcome(rawText, receivedAt)`
+  - Builds a local parse result, then uses or supplements it with the configured LLM parser.
+  - Returns `AppointmentParseOutcome` with source provenance: `LlmSuccess`, `LlmWithLocalSupplement`, `LocalFallback`, `ParserError`, or `LocalOnly`.
+  - With `preferLlm=true`, a non-null LLM result is preferred and missing fields may be filled from local parsing.
+  - Inputs that start with `fallback` and contain a complete compact date/time-range/location pattern such as `fallback 5/17 1400-1600 강남` use the deterministic local result before LLM so the parsed start, end, and location are preserved.
+  - If the LLM returns null/fails, the outcome source is `LocalFallback`; if the LLM result is supplemented by local fields, the source is `LlmWithLocalSupplement` and is not treated as user-visible fallback.
+  - A high-confidence local result can return without LLM when `preferLlm=false`.
 
 - `parseLocally(rawText, receivedAt)`
   - 수신 시각을 기준일로 변환합니다.
   - `parseDate`, `parseTime`, `parseLocation`을 호출해 날짜/시간/장소를 추출합니다.
-  - 날짜와 시간이 모두 있으면 epoch milliseconds `startAt`을 생성합니다.
+  - Slash dates and compact time ranges such as `5/17 1400-1600` are supported; a leading `fallback` marker is removed before location inference.
+  - 날짜와 시간이 모두 있으면 epoch milliseconds `startAt`을 생성하고, 명시적 시간 범위가 있으면 `endAt`도 생성합니다.
   - 시작 시각이 있으면 종료 시각 기본값은 1시간 뒤로 채우고, 제목이 비어 있으면 `M/d HHmm-HHmm 장소` 형식의 기본 제목을 만듭니다.
 
 - `mergeFallback(fallback)`
@@ -260,12 +267,15 @@
   - 알림 처리 등 suspend 문맥에서 후보 1건을 직접 조회합니다.
 
 - `createCandidate(rawText, sourceApp, receivedAt)`
-  - 공유/직접 입력 텍스트를 `rawText`로 보존합니다.
-  - 파싱을 건너뛰고 더미 제목, 수신 시각 기준 시작/종료 시각, 더미 장소로 `AppointmentCandidateEntity`를 만듭니다.
-  - `sourceApp`은 blank면 null로 저장합니다.
-  - 후보 상태는 `pending`으로 저장합니다.
+  - Preserves shared/direct input text as `rawText`.
+  - Calls `KoreanAppointmentParser.parseWithOutcome` and stores parser-derived start/end/location plus stable parse provenance on the pending `AppointmentCandidateEntity`.
+  - The candidate title remains blank until the user enters it in the notification or edit screen.
+  - Never writes parser debug markers into `extractedLocation`; fallback/parser-error candidates keep the parsed location when present and otherwise store null.
+  - If no time can be parsed, start/end remain null instead of using the received/current time placeholder.
+  - Stores blank `sourceApp` as null.
+  - Stores candidate status as `pending`.
   - Planner API save failures log the candidate payload shape and response snippet without logging the raw shared text body.
-
+  - A 401 response clears the cached session token so stale local sessions from a reset/truncated backend require login again.
 - `createScheduleFromInput(rawText, sourceApp, receivedAt)`
   - Legacy direct-save helper that creates a final personal schedule immediately; external share and basket input should prefer `createCandidate` so the user can configure details before confirmation.
   - 파싱과 후보 생성을 건너뛰고 수신 시각부터 1시간짜리 `planned` 개인 일정을 만듭니다.
@@ -276,11 +286,13 @@
   - 시작 시각이 없으면 `NeedsUncertain`을 반환합니다.
   - 시작/종료 구간으로 충돌 일정을 조회하고, 없으면 `Ready`, 있으면 `Conflict`를 반환합니다.
 
-- `saveFromCandidate(candidateId, selectedStatus, titleOverride, force, recurrenceInput)`
+- `saveFromCandidate(candidateId, selectedStatus, titleOverride, force, recurrenceInput, memoOverride)`
   - transaction 안에서 후보 저장을 처리합니다.
   - 후보가 없으면 `MissingCandidate`, 이미 pending이 아니면 `AlreadyHandled`를 반환합니다.
-  - `titleOverride` 또는 후보의 `extractedTitle`이 비어 있으면 `TitleRequired`를 반환합니다.
-  - 제목 override가 있으면 후보의 `extractedTitle`을 먼저 갱신합니다.
+  - Confirmed saves still require a nonblank `titleOverride` or candidate `extractedTitle`; otherwise `TitleRequired` is returned.
+  - Uncertain saves may use a safe internal title from the candidate title, first raw-text line, or `미정 일정`; this fallback title is not written back to the candidate title.
+  - Confirmed title overrides update the candidate `extractedTitle` before final save.
+  - `memoOverride` is stored on the final schedule memo when provided.
   - 상태가 `Uncertain`이거나 시작 시간이 없으면 생성 시각을 fallback 시작 시각으로 사용해 저장하고 `SavedAsUncertain`을 반환합니다.
   - 충돌이 있고 `force=false`이면 `Conflict`를 반환합니다.
   - 충돌이 없거나 강제 저장이면 `insertSchedule` 후 반복 입력이 있으면 반복 규칙을 저장하고, 후보를 `confirmed`로 바꾸고 `Saved`를 반환합니다.
@@ -297,6 +309,10 @@
 
 - `skipRecurringOccurrence(scheduleId, occurrenceStartAt)`
   - 특정 반복 occurrence를 건너뛰는 예외를 저장합니다.
+
+- `deleteSchedule(scheduleId)`
+  - Calls `DELETE /api/planner/schedules/{id}` to remove the signed-in user's whole personal schedule.
+  - Removes the schedule id directly from `scheduleRecords` after DELETE succeeds, then attempts a schedule refresh so weekly observers drop it immediately.
 
 - `discardCandidate(candidateId)`
   - 후보가 존재하고 아직 `pending`이면 `discarded`로 표시합니다.
@@ -325,7 +341,7 @@
 
 - `showCandidate(candidate)`
   - Shows the pending detail setup notification when notification permission/channel state allows it.
-  - The notification title is the schedule detail setup label and it has a single inline `RemoteInput` action labeled confirm for entering the schedule title.
+  - The notification title is the schedule detail setup label and it has a single inline `RemoteInput` action labeled with the Korean schedule-title input copy for entering the schedule title.
   - When the notification cannot be shown, callers fall back to opening the in-app detail setup screen.
 
 - `showConflict(candidate, existing)`
@@ -339,7 +355,7 @@
   - 후보 입력 알림만 제거하고 충돌 알림은 유지할 때 사용합니다.
 
 - `saveAction(candidateId, status, label)`
-  - Builds the inline notification `RemoteInput` confirm action that submits a title for the pending detail setup.
+  - Builds the inline notification `RemoteInput` action that submits a title for the pending detail setup; the action label is the Korean schedule-title input copy and the input label is the Korean schedule-title copy.
 
 
 - `conflictAction(candidateId, actionName, label)`
@@ -349,10 +365,10 @@
   - 충돌 해결 화면을 여는 activity 액션을 만듭니다.
 
 - `candidateSummary(candidate)`
-  - 후보 알림의 한 줄 요약을 만듭니다. 시작 시각이 없으면 “시간 미정” 취지의 문구를 사용하고 장소를 덧붙입니다.
+  - Builds the one-line candidate notification summary with an explicit start-time row label, unknown-time copy for missing start time, and optional location.
 
 - `candidateDetails(candidate)`
-  - 후보 알림의 expanded text를 만듭니다. 자동 제목을 수정할 수 있다는 안내와 공유 출처를 포함합니다.
+  - Builds expanded candidate notification text with explicit start time, end time, and location rows, plus guidance that entering and confirming a title saves to the timetable.
 
 - `formatRange(startAt, endAt)`
   - 알림에 표시할 일정 구간 문자열을 만듭니다. 종료 시각이 없으면 기본 1시간을 적용합니다.
@@ -425,6 +441,8 @@
   - 현재 route에 따라 로그인, 주간 일정, 약속 바구니, 공유, 설정, 일정 편집, 후보 편집, 충돌 해결, 추가 완료 화면 중 하나를 표시합니다. 공유 화면 route와 구현은 유지하지만 하단 탭에서는 노출하지 않습니다.
   - 메인 탭 route는 `MascotScaffold`로 감싸고, 후보 저장 완료 후에는 `Route.Complete(candidateId)`로 이동합니다.
 
+  - `Route.ScheduleEdit` preserves the caller as `returnRoute`; edit back/cancel/save/delete completion returns through that source route.
+
 ### `ui/LoginScreen.kt`
 
 - `LoginScreen(authRepository, onAuthenticated)`
@@ -440,7 +458,7 @@
   - The top controls are compacted so the timetable body gets most of the available height.
 
 - `WeeklyTimetableWidget(days, schedulesByDay, onPreviousWeek, onNextWeek, onOpenSchedule)`
-  - Renders a single-line top bar with previous week, date range, compact start/end inputs, apply, and next week.
+  - Renders previous/date range/next controls on the first compact row and start/end/apply time controls on a second compact row.
   - Expands the timetable area vertically so the visible schedule grid is taller.
 
 - `WeeklyScheduleScreen(repository, onOpenSchedule)`
@@ -459,6 +477,8 @@
 
 - `TimetableEventBlock(event, dayIndex, dayWidth, railWidth, bodyHeight, onOpenSchedule)`
   - occurrence 1건을 시간 위치와 겹침 lane에 맞춰 클릭 가능한 시간표 블록으로 표시하고, 반복 occurrence에는 반복 라벨을 붙입니다.
+
+  - Prioritizes readable title text; shows compact time/recurrence metadata and location only when the event block has enough height and width.
 
 - `buildTimetableEvents(day, schedules)`
   - 하루 일정들을 시작 시간순으로 정렬하고 겹치는 일정이 나란히 보이도록 lane 정보를 계산합니다.
@@ -485,6 +505,11 @@
   - 반복 occurrence에서 열린 경우 `skipRecurringOccurrence`로 해당 occurrence만 건너뛸 수 있습니다.
   - 제목과 시작 시각이 유효할 때 `PlannerRepository.updateSchedule`로 저장하고 일정 화면으로 돌아갑니다.
 
+  - Android system back, visible back, cancel, save success, and delete success all call `onBack` so detail returns to its source route.
+  - Whole-schedule delete is an upper-right action that calls `PlannerRepository.deleteSchedule` without a confirmation dialog and is distinct from occurrence-only skip/delete.
+  - Status, memo, recurrence, and save/cancel controls are compacted into the main edit flow so normal phone layouts show the core settings with minimal overflow scrolling.
+  - Save/delete/occurrence-delete actions set an in-flight guard and keep the user on detail with an error message if the repository call fails.
+
 - `PlannerTextField(value, onValueChange, label, required)`
   - 저장 일정 편집 화면의 공통 텍스트 입력 필드를 렌더링합니다.
 
@@ -510,8 +535,11 @@
 
 - `CandidateEditScreen(repository, candidateId, onDone, onConflict, onBack)`
   - Observes one pending `AppointmentCandidateEntity` as a schedule detail setup, not as a confirmed final schedule.
-  - Lets the user edit title, start/end time, location, and recurrence before the candidate becomes a final schedule.
-  - The primary action is confirm; it updates the candidate and calls `saveFromCandidate(..., ScheduleStatus.Confirmed, ...)`.
+  - Lets the user edit start/end time, location, recurrence, and either an uncertain memo or confirmed title before the candidate becomes a final schedule.
+  - Shows `미정` and `확정` modes; blank-title candidates default to `미정`, while titled candidates default to `확정`.
+  - `미정` shows `일정 메모 작성`, saves `ScheduleStatus.Uncertain`, and keeps memo separate from candidate title.
+  - `확정` shows `일정 제목 작성`, requires a nonblank title, updates the candidate, and calls `saveFromCandidate(..., ScheduleStatus.Confirmed, ...)`.
+  - Displays parse provenance as LLM parsing, fallback, or unknown.
   - On successful save it returns to the weekly timetable; conflicts still route to the conflict screen.
 
 - `StatusSelector(status, onStatus)`
@@ -583,24 +611,27 @@
 ### `widget/PlannerWidgetSync.kt`
 
 - `syncFromPlannerDatabase(context)`
+  - 앱 context가 `OnMyPlateApp`이 아니면 기존 위젯 snapshot을 지우지 않고 동기화를 중단합니다.
   - 앱 context가 `OnMyPlateApp`이고 로그인 세션이 있으면 Supabase 개인 일정 API에서 현재 주 범위의 단일/반복 occurrence를 조회합니다.
   - 세션이 없거나 API 조회에 실패하면 빈 snapshot을 저장합니다.
   - 조회 결과로 `saveSnapshot`을 호출합니다.
 
-- `saveSnapshot(context, schedules)`
+- `saveSnapshot(context, schedules, refreshWidgets=true)`
   - occurrence를 시작 시각 기준으로 정렬합니다.
   - `Asia/Seoul` 날짜별로 `manualEventsByDate` JSON을 구성합니다.
   - 각 occurrence는 title, startMinute, endMinute, source=`manual`, isRecurring 값을 저장합니다.
   - 현재 주 월요일, viewport 기본값, `native-supabase-schedules-v1` schema, generatedAt을 포함한 snapshot JSON을 SharedPreferences에 저장합니다.
+  - When `refreshWidgets=false`, stores only the snapshot and skips widget refresh so serialization tests avoid provider sync side effects.
 
 ### `widget/PlannerWidgetStore.java`
 
 - `getPrefs(context)`
   - 위젯 snapshot 저장에 쓰는 SharedPreferences를 반환합니다.
 
-- `saveSummarySnapshot(context, snapshotJson)`
+- `saveSummarySnapshot(context, snapshotJson[, refreshWidgets])`
   - `summary_snapshot` key에 snapshot JSON을 동기적으로 저장합니다.
   - 저장 직후 `SummaryWidgetProvider.refreshAll`로 모든 위젯을 갱신합니다.
+  - When `refreshWidgets=false`, only saves the snapshot and does not call refresh.
 
 ### `widget/SummaryWidgetProvider.java`
 
@@ -738,8 +769,10 @@
 - `uploadPersonalSchedule(userId, request)`
   - 로그인 사용자의 개인 일정 row를 생성/upsert하고 반복 규칙/예외를 개인 일정 반복 테이블에 저장한 뒤 schedule JSON을 반환합니다.
 
-- `listPersonalSchedules(userId)` / `getPersonalSchedule(userId, scheduleId)` / `updatePersonalSchedule(userId, scheduleId, request)`
+- `listPersonalSchedules(userId)` / `getPersonalSchedule(userId, scheduleId)` / `updatePersonalSchedule(userId, scheduleId, request)` / `deletePersonalSchedule(userId, scheduleId)`
   - 로그인 사용자가 소유한 개인 일정 목록/단건 조회와 PATCH 수정을 처리하고 반복 metadata를 응답에 포함합니다.
+
+  - DELETE removes the whole personal schedule and returns `{ ok: true }`; read/update responses include recurrence metadata.
 
 - `addPersonalScheduleRecurrenceException(userId, scheduleId, request)`
   - 로그인 사용자가 소유한 반복 일정 occurrence skip 예외를 저장합니다.
@@ -757,6 +790,7 @@
 
 - `requireGroupMember(userId, groupId)` / `requireUserId(request)`
   - 공유 그룹 접근 권한과 `Authorization: Bearer <session-token>` 인증 값을 검증합니다.
+  - `requireUserId` also verifies the bearer id still exists in `planner_users`; missing rows return 401 instead of causing downstream FK errors.
 
 - `readSchedulePayload(request)` / `readRecurrenceRule(value)` / `readRecurrenceExceptions(value)`
   - 요청 JSON에서 일정 본문, 일간/주간/월간 반복 규칙, skip 예외 목록을 읽고 유효성을 검사합니다.
@@ -787,7 +821,7 @@
 
 - `AppointmentCandidateEntity`
   - 공유/직접 입력으로 생성된 “일정 후보”입니다.
-  - 원본 텍스트, 공유 출처, 파싱된 시작/종료/장소, 자동 생성 또는 사용자가 수정한 제목, 상태, 생성 시각을 보관합니다.
+  - Stores raw text, source app, parsed start/end/location, user-edited or generated title, stable parse source, status, and creation time.
 
 ### `data/entity/ScheduleEntity.kt`
 

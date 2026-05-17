@@ -8,9 +8,13 @@ import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceExceptionEntity
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceRuleEntity
 import com.lss.onmyplate.nativeplanner.domain.conflict.ConflictDetector
+import com.lss.onmyplate.nativeplanner.domain.model.AppointmentParseOutcome
+import com.lss.onmyplate.nativeplanner.domain.model.AppointmentParseResult
+import com.lss.onmyplate.nativeplanner.domain.model.AppointmentParseSource
 import com.lss.onmyplate.nativeplanner.domain.model.CandidateStatus
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
 import com.lss.onmyplate.nativeplanner.domain.model.TimeConfidence
+import com.lss.onmyplate.nativeplanner.domain.model.toStoredValue
 import com.lss.onmyplate.nativeplanner.domain.parser.KoreanAppointmentParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -40,7 +44,7 @@ class PlannerRepository(
 ) {
     private val appContext = context.applicationContext
     private val sessionPrefs = appContext.getSharedPreferences(BuildConfig.PLANNER_SESSION_PREFS_NAME, Context.MODE_PRIVATE)
-    private val client = PlannerApiClient(BuildConfig.PLANNER_API_BASE_URL)
+    private val client = PlannerApiClient(BuildConfig.PLANNER_API_BASE_URL) { clearCachedSession() }
     private val scheduleRecords = MutableStateFlow<List<ScheduleRecord>>(emptyList())
     private val pendingCandidates = MutableStateFlow<List<AppointmentCandidateEntity>>(emptyList())
     private val candidateRecords = MutableStateFlow<Map<String, AppointmentCandidateEntity>>(emptyMap())
@@ -83,22 +87,19 @@ class PlannerRepository(
 
     suspend fun createCandidate(rawText: String, sourceApp: String?, receivedAt: Long): AppointmentCandidateEntity {
         Log.i(TAG, "createCandidate started. textLength=${rawText.length}, sourceApp=$sourceApp, apiConfigured=${client.isConfigured()}, hasSession=${hasCachedSession()}")
-        val startAt = receivedAt
-        val endAt = startAt + ChronoUnit.HOURS.duration.toMillis()
-        val localCandidate = AppointmentCandidateEntity(
+        val parseOutcome = runCatching { parser.parseWithOutcome(rawText, receivedAt) }
+            .getOrElse { error ->
+                Log.w(TAG, "createCandidate parser failed; using parser-error fallback. textLength=${rawText.length}", error)
+                parserErrorOutcome()
+            }
+        val localCandidate = candidateFromParseOutcome(
             id = UUID.randomUUID().toString(),
             rawText = rawText,
-            sourceApp = sourceApp?.takeIf { it.isNotBlank() },
-            extractedTitle = "",
-            extractedStartAt = startAt,
-            extractedEndAt = endAt,
-            extractedLocation = null,
-            confidence = 0f,
-            timeConfidence = TimeConfidence.Low.dbValue,
-            status = CandidateStatus.Pending.dbValue,
-            createdAt = receivedAt,
+            sourceApp = sourceApp,
+            receivedAt = receivedAt,
+            parseOutcome = parseOutcome,
         )
-        Log.i(TAG, "createCandidate skipped parser and built dummy candidate. ${localCandidate.diagnosticSummary()}")
+        Log.i(TAG, "createCandidate built parser-backed candidate. parseSource=${parseOutcome.source}, ${localCandidate.diagnosticSummary()}")
         val saved = try {
             withContext(Dispatchers.IO) {
                 val token = sessionToken()
@@ -168,15 +169,17 @@ class PlannerRepository(
         titleOverride: String?,
         force: Boolean = false,
         recurrenceInput: RecurrenceInput = RecurrenceInput.None,
+        memoOverride: String? = null,
     ): SaveResult {
         val candidate = getCandidate(candidateId) ?: return SaveResult.MissingCandidate
         if (candidate.status != CandidateStatus.Pending.dbValue) return SaveResult.AlreadyHandled
-        val title = titleOverride?.trim()?.takeIf { it.isNotBlank() }
-            ?: candidate.extractedTitle.takeIf { it.isNotBlank() }
-            ?: return SaveResult.TitleRequired
-        val titledCandidate = if (candidate.extractedTitle == title) candidate else {
+        val title = candidateScheduleTitle(candidate, selectedStatus, titleOverride) ?: return SaveResult.TitleRequired
+        val shouldPersistTitle = selectedStatus != ScheduleStatus.Uncertain && candidate.extractedTitle != title
+        val titledCandidate = if (shouldPersistTitle) {
             updateCandidate(candidate.id, title, candidate.extractedStartAt, candidate.extractedEndAt, candidate.extractedLocation)
             getCandidate(candidate.id)?.copy(extractedTitle = title) ?: candidate.copy(extractedTitle = title)
+        } else {
+            candidate
         }
 
         val startAt = titledCandidate.extractedStartAt
@@ -188,18 +191,13 @@ class PlannerRepository(
         }
 
         val now = System.currentTimeMillis()
-        val schedule = ScheduleEntity(
+        val schedule = scheduleFromCandidateSave(
             id = UUID.randomUUID().toString(),
+            candidate = titledCandidate,
             title = title,
-            startAt = startAt ?: titledCandidate.createdAt,
-            endAt = titledCandidate.extractedEndAt,
-            location = titledCandidate.extractedLocation,
-            memo = null,
-            status = scheduleStatus.dbValue,
-            sourceText = titledCandidate.rawText,
-            sourceApp = titledCandidate.sourceApp,
-            createdAt = now,
-            updatedAt = now,
+            scheduleStatus = scheduleStatus,
+            memoOverride = memoOverride,
+            now = now,
         )
         val savedRecord = withContext(Dispatchers.IO) {
             client.createSchedule(sessionToken(), schedule, recurrenceFor(schedule, recurrenceInput), emptyList())
@@ -254,6 +252,16 @@ class PlannerRepository(
         refreshSchedules()
     }
 
+    suspend fun deleteSchedule(scheduleId: String) {
+        withContext(Dispatchers.IO) { client.deleteSchedule(sessionToken(), scheduleId) }
+        scheduleRecords.value = scheduleRecords.value.filterNot { it.schedule.id == scheduleId }
+        try {
+            refreshSchedules()
+        } catch (error: Throwable) {
+            Log.w(TAG, "deleteSchedule succeeded but refreshSchedules failed. scheduleId=$scheduleId", error)
+        }
+    }
+
     suspend fun discardCandidate(candidateId: String) {
         withContext(Dispatchers.IO) { client.discardCandidate(sessionToken(), candidateId) }
         candidateRecords.value = candidateRecords.value + (candidateId to (candidateRecords.value[candidateId]?.copy(status = CandidateStatus.Discarded.dbValue)
@@ -291,7 +299,7 @@ class PlannerRepository(
     }
 
     private fun AppointmentCandidateEntity.diagnosticSummary(): String =
-        "localCandidateId=$id, rawTextLength=${rawText.length}, hasSourceApp=${sourceApp != null}, hasTitle=${extractedTitle.isNotBlank()}, hasStart=${extractedStartAt != null}, hasEnd=${extractedEndAt != null}, hasLocation=${extractedLocation != null}, confidence=$confidence, timeConfidence=$timeConfidence, status=$status, createdAt=$createdAt"
+        "localCandidateId=$id, rawTextLength=${rawText.length}, hasSourceApp=${sourceApp != null}, hasTitle=${extractedTitle.isNotBlank()}, hasStart=${extractedStartAt != null}, hasEnd=${extractedEndAt != null}, hasLocation=${extractedLocation != null}, parseSource=$parseSource, confidence=$confidence, timeConfidence=$timeConfidence, status=$status, createdAt=$createdAt"
 
     private fun sessionToken(): String =
         sessionPrefs.getString(BuildConfig.PLANNER_SESSION_TOKEN_KEY, null)?.takeIf { it.isNotBlank() }
@@ -299,6 +307,10 @@ class PlannerRepository(
 
     private fun hasCachedSession(): Boolean =
         sessionPrefs.getString(BuildConfig.PLANNER_SESSION_TOKEN_KEY, null)?.isNotBlank() == true
+
+    private fun clearCachedSession() {
+        sessionPrefs.edit().remove(BuildConfig.PLANNER_SESSION_TOKEN_KEY).apply()
+    }
 
     private fun recurrenceFor(schedule: ScheduleEntity, recurrenceInput: RecurrenceInput): ScheduleRecurrenceRuleEntity? {
         val now = System.currentTimeMillis()
@@ -434,6 +446,81 @@ class PlannerRepository(
     }
 }
 
+internal fun candidateFromParseOutcome(
+    id: String,
+    rawText: String,
+    sourceApp: String?,
+    receivedAt: Long,
+    parseOutcome: AppointmentParseOutcome,
+): AppointmentCandidateEntity {
+    val parsed = parseOutcome.result
+    return AppointmentCandidateEntity(
+        id = id,
+        rawText = rawText,
+        sourceApp = sourceApp?.takeIf { it.isNotBlank() },
+        extractedTitle = "",
+        extractedStartAt = parsed.startAt,
+        extractedEndAt = parsed.endAt,
+        extractedLocation = parsed.location?.ifBlank { null },
+        confidence = parsed.confidence,
+        timeConfidence = parsed.timeConfidence.dbValue,
+        status = CandidateStatus.Pending.dbValue,
+        createdAt = receivedAt,
+        parseSource = parseOutcome.source.toStoredValue(),
+    )
+}
+
+internal fun parserErrorOutcome(): AppointmentParseOutcome = AppointmentParseOutcome(
+    result = AppointmentParseResult(
+        title = "",
+        startAt = null,
+        endAt = null,
+        location = null,
+        confidence = 0f,
+        timeConfidence = TimeConfidence.Low,
+    ),
+    source = AppointmentParseSource.ParserError,
+)
+
+internal fun candidateScheduleTitle(
+    candidate: AppointmentCandidateEntity,
+    selectedStatus: ScheduleStatus,
+    titleOverride: String?,
+): String? {
+    val explicitTitle = titleOverride?.trim()?.takeIf { it.isNotBlank() }
+    val candidateTitle = candidate.extractedTitle.takeIf { it.isNotBlank() }
+    return if (selectedStatus == ScheduleStatus.Uncertain) {
+        explicitTitle ?: candidateTitle ?: candidate.rawText.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotBlank() }
+            ?.take(40)
+            ?: "미정 일정"
+    } else {
+        explicitTitle ?: candidateTitle
+    }
+}
+
+internal fun scheduleFromCandidateSave(
+    id: String,
+    candidate: AppointmentCandidateEntity,
+    title: String,
+    scheduleStatus: ScheduleStatus,
+    memoOverride: String?,
+    now: Long,
+): ScheduleEntity = ScheduleEntity(
+    id = id,
+    title = title,
+    startAt = candidate.extractedStartAt ?: candidate.createdAt,
+    endAt = candidate.extractedEndAt,
+    location = candidate.extractedLocation,
+    memo = memoOverride?.ifBlank { null },
+    status = scheduleStatus.dbValue,
+    sourceText = candidate.rawText,
+    sourceApp = candidate.sourceApp,
+    createdAt = now,
+    updatedAt = now,
+)
+
 data class ScheduleRecord(
     val schedule: ScheduleEntity,
     val recurrence: ScheduleRecurrenceRuleEntity?,
@@ -446,7 +533,10 @@ private fun mergeScheduleRecords(existing: List<ScheduleRecord>, updates: List<S
     return byId.values.sortedBy { it.schedule.startAt }
 }
 
-private class PlannerApiClient(private val rawBaseUrl: String) {
+private class PlannerApiClient(
+    private val rawBaseUrl: String,
+    private val onUnauthorized: () -> Unit,
+) {
     private val baseUrl = rawBaseUrl.trim().trimEnd('/')
 
     fun isConfigured(): Boolean = baseUrl.isNotBlank()
@@ -482,6 +572,10 @@ private class PlannerApiClient(private val rawBaseUrl: String) {
     ): ScheduleRecord {
         val json = JSONObject(request("PATCH", "/api/planner/schedules/${url(schedule.id)}", token, schedule.toApiJson(recurrence, exceptions)))
         return json.getJSONObject("schedule").toScheduleRecord()
+    }
+
+    fun deleteSchedule(token: String, scheduleId: String) {
+        request("DELETE", "/api/planner/schedules/${url(scheduleId)}", token, null)
     }
 
     fun addRecurrenceException(token: String, scheduleId: String, occurrenceStartAt: Long) {
@@ -554,6 +648,7 @@ private class PlannerApiClient(private val rawBaseUrl: String) {
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.use { input -> BufferedReader(InputStreamReader(input)).readText() }.orEmpty()
             if (code !in 200..299) {
+                if (code == HttpURLConnection.HTTP_UNAUTHORIZED) onUnauthorized()
                 Log.e(
                     TAG,
                     "Planner API request failed. method=$method, path=$path, status=$code, error=${apiErrorMessage(code, text)}, responseLength=${text.length}, responseSnippet=${text.safeSnippet()}",
@@ -597,6 +692,7 @@ private class PlannerApiClient(private val rawBaseUrl: String) {
         .putNullable("extractedLocation", extractedLocation)
         .put("confidence", confidence.toDouble())
         .put("timeConfidence", timeConfidence)
+        .put("parseSource", parseSource)
         .put("status", status)
         .put("createdAt", Instant.ofEpochMilli(createdAt).toString())
 
@@ -646,6 +742,7 @@ private class PlannerApiClient(private val rawBaseUrl: String) {
         timeConfidence = optString("timeConfidence", optString("time_confidence", "")),
         status = optString("status", CandidateStatus.Pending.dbValue),
         createdAt = optNullableString("createdAt", "created_at")?.let { parseInstantMillis(it) } ?: 0L,
+        parseSource = optString("parseSource", optString("parse_source", "unknown")),
     )
 
     private fun JSONObject.toRecurrenceRule(scheduleId: String): ScheduleRecurrenceRuleEntity = ScheduleRecurrenceRuleEntity(

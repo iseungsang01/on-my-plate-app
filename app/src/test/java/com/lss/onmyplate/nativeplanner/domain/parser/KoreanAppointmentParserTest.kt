@@ -1,7 +1,8 @@
 package com.lss.onmyplate.nativeplanner.domain.parser
 
-import com.lss.onmyplate.nativeplanner.domain.model.TimeConfidence
 import com.lss.onmyplate.nativeplanner.domain.model.AppointmentParseResult
+import com.lss.onmyplate.nativeplanner.domain.model.AppointmentParseSource
+import com.lss.onmyplate.nativeplanner.domain.model.TimeConfidence
 import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlinx.coroutines.runBlocking
@@ -44,6 +45,26 @@ class KoreanAppointmentParserTest {
     }
 
     @Test
+    fun parsesFallbackSlashDateCompactTimeRangeAndLocation() = runBlocking {
+        val result = parser.parse("fallback 5/17 1400-1600 강남", receivedAt)
+
+        assertEquals(epochMillis(2026, 5, 17, 14, 0), result.startAt)
+        assertEquals(epochMillis(2026, 5, 17, 16, 0), result.endAt)
+        assertEquals("강남", result.location)
+        assertEquals("5/17 1400-1600 강남", result.title)
+        assertEquals(TimeConfidence.High, result.timeConfidence)
+    }
+
+    @Test
+    fun parsesSlashDateColonRangeWithoutFallbackMarker() = runBlocking {
+        val result = parser.parse("5/17 14:00-16:00 강남", receivedAt)
+
+        assertEquals(epochMillis(2026, 5, 17, 14, 0), result.startAt)
+        assertEquals(epochMillis(2026, 5, 17, 16, 0), result.endAt)
+        assertEquals("강남", result.location)
+    }
+
+    @Test
     fun extractsLocation() = runBlocking {
         assertEquals("강남", parser.parse("오늘 저녁 7시 강남에서 회의", receivedAt).location)
         assertEquals("홍대", parser.parse("5월 20일 18:30 홍대 약속", receivedAt).location)
@@ -81,6 +102,51 @@ class KoreanAppointmentParserTest {
         assertEquals(llmStartAt + 60 * 60 * 1_000L, result.endAt)
         assertEquals("LLM place", result.location)
         assertEquals(1.0f, result.confidence)
+    }
+
+    @Test
+    fun fallbackCompactRangeUsesLocalResultEvenWhenPreferLlmIsEnabled() = runBlocking {
+        val llmParser = AppointmentLlmParser { _, _ ->
+            AppointmentParseResult(
+                title = "Wrong LLM",
+                startAt = epochMillis(2026, 5, 18, 9, 0),
+                endAt = epochMillis(2026, 5, 18, 10, 0),
+                location = "다른 장소",
+                confidence = 0.95f,
+                timeConfidence = TimeConfidence.High,
+            )
+        }
+        val parser = KoreanAppointmentParser(zoneId = zoneId, llmParser = llmParser, preferLlm = true)
+
+        val outcome = parser.parseWithOutcome("fallback 5/17 1400-1600 강남", receivedAt)
+
+        assertEquals(AppointmentParseSource.LocalOnly, outcome.source)
+        assertEquals(epochMillis(2026, 5, 17, 14, 0), outcome.result.startAt)
+        assertEquals(epochMillis(2026, 5, 17, 16, 0), outcome.result.endAt)
+        assertEquals("강남", outcome.result.location)
+        assertEquals("5/17 1400-1600 강남", outcome.result.title)
+    }
+
+    @Test
+    fun fallbackSingleTimeDoesNotBypassLlmWithoutExplicitRange() = runBlocking {
+        val llmStartAt = epochMillis(2026, 5, 18, 9, 0)
+        val llmParser = AppointmentLlmParser { _, _ ->
+            AppointmentParseResult(
+                title = "LLM wins",
+                startAt = llmStartAt,
+                endAt = epochMillis(2026, 5, 18, 10, 0),
+                location = "LLM place",
+                confidence = 0.95f,
+                timeConfidence = TimeConfidence.High,
+            )
+        }
+        val parser = KoreanAppointmentParser(zoneId = zoneId, llmParser = llmParser, preferLlm = true)
+
+        val outcome = parser.parseWithOutcome("fallback 내일 7시 강남", receivedAt)
+
+        assertEquals(AppointmentParseSource.LlmSuccess, outcome.source)
+        assertEquals(llmStartAt, outcome.result.startAt)
+        assertEquals("LLM place", outcome.result.location)
     }
 
     @Test
@@ -136,6 +202,86 @@ class KoreanAppointmentParserTest {
 
         assertEquals(epochMillis(2026, 5, 8, 14, 0), result.startAt)
         assertEquals("카페", result.location)
+    }
+
+
+    @Test
+    fun parseWithOutcomeMarksLlmSuccessWhenLlmProvidesAllFields() = runBlocking {
+        val llmStartAt = epochMillis(2026, 5, 13, 16, 0)
+        val llmParser = AppointmentLlmParser { _, _ ->
+            AppointmentParseResult(
+                title = "LLM appointment",
+                startAt = llmStartAt,
+                endAt = epochMillis(2026, 5, 13, 18, 0),
+                location = "Gangnam",
+                confidence = 0.9f,
+                timeConfidence = TimeConfidence.High,
+            )
+        }
+        val parser = KoreanAppointmentParser(zoneId = zoneId, llmParser = llmParser, preferLlm = true)
+
+        val outcome = parser.parseWithOutcome("appointment text", receivedAt)
+
+        assertEquals(AppointmentParseSource.LlmSuccess, outcome.source)
+        assertEquals(llmStartAt, outcome.result.startAt)
+        assertEquals("Gangnam", outcome.result.location)
+    }
+
+    @Test
+    fun parseWithOutcomeKeepsLlmSuccessWhenOnlyDefaultEndIsNeeded() = runBlocking {
+        val llmStartAt = epochMillis(2026, 5, 13, 16, 0)
+        val llmParser = AppointmentLlmParser { _, _ ->
+            AppointmentParseResult(
+                title = "",
+                startAt = llmStartAt,
+                endAt = null,
+                location = "Gangnam",
+                confidence = 0.9f,
+                timeConfidence = TimeConfidence.High,
+            )
+        }
+        val parser = KoreanAppointmentParser(zoneId = zoneId, llmParser = llmParser, preferLlm = true)
+
+        val outcome = parser.parseWithOutcome("appointment text", receivedAt)
+
+        assertEquals(AppointmentParseSource.LlmSuccess, outcome.source)
+        assertEquals(llmStartAt + 60 * 60 * 1_000L, outcome.result.endAt)
+    }
+
+    @Test
+    fun parseWithOutcomeMarksLocalFallbackWhenLlmReturnsNull() = runBlocking {
+        val parser = KoreanAppointmentParser(
+            zoneId = zoneId,
+            llmParser = AppointmentLlmParser { _, _ -> null },
+            preferLlm = true,
+        )
+
+        val outcome = parser.parseWithOutcome("내일 오후 2시 카페에서 만나", receivedAt)
+
+        assertEquals(AppointmentParseSource.LocalFallback, outcome.source)
+        assertEquals(epochMillis(2026, 5, 8, 14, 0), outcome.result.startAt)
+        assertEquals("카페", outcome.result.location)
+    }
+
+    @Test
+    fun parseWithOutcomeMarksLocalSupplementWhenLlmOmitsLocation() = runBlocking {
+        val llmStartAt = epochMillis(2026, 5, 8, 14, 0)
+        val llmParser = AppointmentLlmParser { _, _ ->
+            AppointmentParseResult(
+                title = "",
+                startAt = llmStartAt,
+                endAt = epochMillis(2026, 5, 8, 15, 0),
+                location = null,
+                confidence = 0.8f,
+                timeConfidence = TimeConfidence.High,
+            )
+        }
+        val parser = KoreanAppointmentParser(zoneId = zoneId, llmParser = llmParser, preferLlm = true)
+
+        val outcome = parser.parseWithOutcome("내일 오후 2시 카페에서 만나", receivedAt)
+
+        assertEquals(AppointmentParseSource.LlmWithLocalSupplement, outcome.source)
+        assertEquals("카페", outcome.result.location)
     }
 
     private fun epochMillis(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =

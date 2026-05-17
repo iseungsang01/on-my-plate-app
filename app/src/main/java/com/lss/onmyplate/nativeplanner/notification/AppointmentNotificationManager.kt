@@ -23,6 +23,9 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.absoluteValue
 
+internal const val CANDIDATE_TITLE_INPUT_ACTION_LABEL = "\uC77C\uC815 \uC81C\uBAA9 \uC785\uB825"
+internal const val CANDIDATE_REMOTE_INPUT_LABEL = "\uC77C\uC815 \uC81C\uBAA9"
+
 class AppointmentNotificationManager(private val context: Context) {
     private val notificationManager = NotificationManagerCompat.from(context)
     private val zoneId = ZoneId.of("Asia/Seoul")
@@ -57,7 +60,7 @@ class AppointmentNotificationManager(private val context: Context) {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
-            .addAction(saveAction(candidate.id, ScheduleStatus.Confirmed, "확정"))
+            .addAction(saveAction(candidate.id, ScheduleStatus.Confirmed, CANDIDATE_TITLE_INPUT_ACTION_LABEL))
             .build()
 
         notificationManager.notify(candidate.id.hashCode(), notification)
@@ -100,7 +103,7 @@ class AppointmentNotificationManager(private val context: Context) {
         val pendingIntent = PendingIntent.getBroadcast(context, (candidateId + status.dbValue).hashCode(), intent, mutablePendingFlags())
         val builder = NotificationCompat.Action.Builder(R.drawable.ic_stat_calendar, label, pendingIntent)
         val remoteInput = RemoteInput.Builder(KEY_REMOTE_TITLE)
-            .setLabel("일정 제목")
+            .setLabel(CANDIDATE_REMOTE_INPUT_LABEL)
             .build()
         builder.addRemoteInput(remoteInput)
         return builder.build()
@@ -125,16 +128,11 @@ class AppointmentNotificationManager(private val context: Context) {
             PendingIntent.getActivity(context, (candidateId + label).hashCode(), MainActivity.conflictIntent(context, candidateId), immutablePendingFlags()),
         ).build()
 
-    private fun candidateSummary(candidate: AppointmentCandidateEntity): String {
-        val time = candidate.extractedStartAt?.let { formatter.format(Instant.ofEpochMilli(it)) } ?: "시간 미정"
-        val location = candidate.extractedLocation?.let { " · $it" }.orEmpty()
-        return "$time$location"
-    }
+    private fun candidateSummary(candidate: AppointmentCandidateEntity): String =
+        CandidateNotificationText.summary(candidate, formatter)
 
-    private fun candidateDetails(candidate: AppointmentCandidateEntity): String {
-        val source = candidate.sourceApp?.let { "\n공유 앱: $it" }.orEmpty()
-        return "${candidateSummary(candidate)}\n제목을 입력하고 확정하면 시간표에 저장됩니다.$source"
-    }
+    private fun candidateDetails(candidate: AppointmentCandidateEntity): String =
+        CandidateNotificationText.details(candidate, formatter)
 
     private fun formatRange(startAt: Long, endAt: Long?): String {
         val effectiveEnd = ConflictDetector.newEnd(startAt, endAt)
@@ -170,4 +168,28 @@ class AppointmentNotificationManager(private val context: Context) {
         const val EXTRA_STATUS = "status"
         const val KEY_REMOTE_TITLE = "remote_title"
     }
+}
+
+internal object CandidateNotificationText {
+    private const val UnknownTime = "미정"
+
+    fun summary(candidate: AppointmentCandidateEntity, formatter: DateTimeFormatter): String {
+        val start = formatTime(candidate.extractedStartAt, formatter)
+        val location = candidate.extractedLocation?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+        return "시작 시간 : $start$location"
+    }
+
+    fun details(candidate: AppointmentCandidateEntity, formatter: DateTimeFormatter): String {
+        val location = candidate.extractedLocation.orEmpty()
+        val source = candidate.sourceApp?.takeIf { it.isNotBlank() }?.let { "\n공유 앱: $it" }.orEmpty()
+        return listOf(
+            "시작 시간 : ${formatTime(candidate.extractedStartAt, formatter)}",
+            "종료 시간 : ${formatTime(candidate.extractedEndAt, formatter)}",
+            "장소 : $location",
+            "일정 제목을 입력하고 확정하면 시간표에 저장됩니다",
+        ).joinToString("\n") + source
+    }
+
+    private fun formatTime(value: Long?, formatter: DateTimeFormatter): String =
+        value?.let { formatter.format(Instant.ofEpochMilli(it)) } ?: UnknownTime
 }

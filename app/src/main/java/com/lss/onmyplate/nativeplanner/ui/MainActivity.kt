@@ -164,7 +164,7 @@ class MainActivity : ComponentActivity() {
                     "\uc77c\uc815 \ub514\ud14c\uc77c \uc124\uc815\uc744 \ub9cc\ub4e4\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \ub85c\uadf8\uc778 \ub610\ub294 \ub124\ud2b8\uc6cc\ud06c\ub97c \ud655\uc778\ud574 \uc8fc\uc138\uc694.",
                     Toast.LENGTH_LONG,
                 ).show()
-                routeState.value = Route.Basket
+                routeState.value = if (hasAppAccess()) Route.Basket else Route.Login
             }
         }
     }
@@ -237,7 +237,11 @@ sealed interface Route {
     data object Sharing : Route
     data object Settings : Route
     data object Login : Route
-    data class ScheduleEdit(val scheduleId: String, val occurrenceStartAt: Long? = null) : Route
+    data class ScheduleEdit(
+        val scheduleId: String,
+        val occurrenceStartAt: Long? = null,
+        val returnRoute: Route = Schedule,
+    ) : Route
     data class Candidate(val candidateId: String) : Route
     data class Conflict(val candidateId: String) : Route
     data class Complete(val candidateId: String) : Route
@@ -256,7 +260,7 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () 
         Route.Login -> LoginScreen(authRepository = app.authRepository, onAuthenticated = onAuthenticated)
         Route.Schedule -> MascotScaffold(selected = MainTab.Schedule, onRoute = onRoute) {
             WeeklyScheduleScreen(repository = app.repository, onOpenSchedule = { scheduleId, occurrenceStartAt ->
-                onRoute(Route.ScheduleEdit(scheduleId, occurrenceStartAt))
+                onRoute(Route.ScheduleEdit(scheduleId, occurrenceStartAt, returnRoute = Route.Schedule))
             })
         }
         Route.Basket -> MascotScaffold(selected = MainTab.Basket, onRoute = onRoute) {
@@ -284,7 +288,7 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () 
             repository = app.repository,
             scheduleId = route.scheduleId,
             occurrenceStartAt = route.occurrenceStartAt,
-            onBack = { onRoute(Route.Schedule) },
+            onBack = { onRoute(route.returnRoute) },
         )
         is Route.Candidate -> CandidateEditScreen(
             repository = app.repository,

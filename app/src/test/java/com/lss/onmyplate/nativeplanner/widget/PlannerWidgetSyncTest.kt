@@ -38,6 +38,7 @@ class PlannerWidgetSyncTest {
                 occurrence(schedule(id = "later", title = "Later", startAt = secondStart, endAt = secondStart + 45 * 60 * 1_000L)),
                 occurrence(schedule(id = "earlier", title = "Earlier", startAt = firstStart, endAt = firstStart + 60 * 60 * 1_000L)),
             ),
+            refreshWidgets = false,
         )
 
         val snapshot = JSONObject(
@@ -73,6 +74,7 @@ class PlannerWidgetSyncTest {
         PlannerWidgetSync.saveSnapshot(
             context,
             listOf(occurrence(schedule(id = "open-ended", title = "Open Ended", startAt = startAt, endAt = null))),
+            refreshWidgets = false,
         )
 
         val event = JSONObject(

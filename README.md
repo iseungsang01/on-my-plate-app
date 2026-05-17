@@ -80,3 +80,11 @@ The native Android widget is part of this MVP and renders the signed-in user's p
 The Android app uses a single Supabase Edge Function, `planner-api`, for app login, candidate storage, personal schedules, widget sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` (or CI env) as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` uses the app's own `planner_users` rows, creates a user row on first login, stores only a user-id salted password hash, returns the user id as the app session token, and then writes to Supabase with server-only service-role credentials.
 
 The Android app never stores service-role credentials, does not read the old `on_my_plate_native.db` Room database, and no longer depends on any PC-local backend. Shared-screen-only fake entries live in `planner_dummy_schedules` and are never copied into personal schedules or the home widget. See `docs/supabaseSQL.md` for the server-side schema and RLS posture.
+
+When `supabase/functions/planner-api/index.ts` changes, redeploy the Edge Function before testing or releasing the app:
+
+```powershell
+supabase functions deploy planner-api --use-api --no-verify-jwt --project-ref gznuqhjenzeucpmonesl
+```
+
+Keep `--no-verify-jwt` / `verify_jwt = false` because the app sends its own `Authorization: Bearer <userId>` session token instead of a Supabase Auth JWT. After every deploy, run API smoke checks against `PLANNER_API_BASE_URL`: a valid-format fake bearer token must return `401`, and a real or disposable login token must return `200` from `GET /api/planner/candidates?status=pending`. For candidate-intake changes, also verify `POST /api/planner/candidates` returns `200` and then clean up any disposable smoke-test rows.

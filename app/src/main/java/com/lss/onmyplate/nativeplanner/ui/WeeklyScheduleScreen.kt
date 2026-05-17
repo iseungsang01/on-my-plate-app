@@ -31,6 +31,7 @@ import java.time.temporal.TemporalAdjusters
 private val scheduleZone = ZoneId.of("Asia/Seoul")
 private val dayLabelFormatter = DateTimeFormatter.ofPattern("M/d")
 private val weekdayFormatter = DateTimeFormatter.ofPattern("E")
+private val timetableRailWidth = 24.dp
 private const val timetableEndMinute = 24 * 60
 private const val defaultScheduleDurationMinutes = 60
 
@@ -94,7 +95,7 @@ private fun WeeklyTimetableWidget(
         border = BorderStroke(1.dp, FeedLoopColors.Border),
         elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
     ) {
-        Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -108,48 +109,54 @@ private fun WeeklyTimetableWidget(
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = FeedLoopColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = startHourInput,
-                        onValueChange = { if (it.length <= 2 && it.all(Char::isDigit)) startHourInput = it },
-                        placeholder = { Text("시작") },
-                        modifier = Modifier.width(58.dp),
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.labelSmall,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    )
-                    Text("~", color = FeedLoopColors.Secondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
-                    OutlinedTextField(
-                        value = endHourInput,
-                        onValueChange = { if (it.length <= 2 && it.all(Char::isDigit)) endHourInput = it },
-                        placeholder = { Text("끝") },
-                        modifier = Modifier.width(58.dp),
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.labelSmall,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    )
-                    Button(
-                        onClick = {
-                            val start = parsedStartHour ?: return@Button
-                            val end = parsedEndHour ?: return@Button
-                            if (start in 0..23 && end in 1..24 && start < end) {
-                                visibleStartHour = start
-                                visibleEndHour = end
-                                startHourInput = start.toString()
-                                endHourInput = end.toString()
-                            }
-                        },
-                        enabled = canApplyTimeRange,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.heightIn(min = 32.dp),
-                    ) {
-                        Text("적용", style = MaterialTheme.typography.labelSmall)
-                    }
-                    IconButton(onClick = onNextWeek, modifier = Modifier.size(32.dp)) {
-                        Text(">", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    }
+                IconButton(onClick = onNextWeek, modifier = Modifier.size(32.dp)) {
+                    Text(">", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = startHourInput,
+                    onValueChange = { if (it.length <= 2 && it.all(Char::isDigit)) startHourInput = it },
+                    placeholder = { Text("시작") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.labelSmall,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                Text("~", color = FeedLoopColors.Secondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                OutlinedTextField(
+                    value = endHourInput,
+                    onValueChange = { if (it.length <= 2 && it.all(Char::isDigit)) endHourInput = it },
+                    placeholder = { Text("끝") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.labelSmall,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                Button(
+                    onClick = {
+                        val start = parsedStartHour ?: return@Button
+                        val end = parsedEndHour ?: return@Button
+                        if (start in 0..23 && end in 1..24 && start < end) {
+                            visibleStartHour = start
+                            visibleEndHour = end
+                            startHourInput = start.toString()
+                            endHourInput = end.toString()
+                        }
+                    },
+                    enabled = canApplyTimeRange,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.heightIn(min = 32.dp),
+                ) {
+                    Text("적용", style = MaterialTheme.typography.labelSmall, maxLines = 1)
                 }
             }
             TimetableHeader(days = days)
@@ -167,11 +174,11 @@ private fun WeeklyTimetableWidget(
 
 @Composable
 private fun TimetableHeader(days: List<LocalDate>) {
-    val railWidth = 28.dp
+    val railWidth = timetableRailWidth
     Row(
         Modifier
             .fillMaxWidth()
-            .height(32.dp)
+            .height(28.dp)
             .clip(MaterialTheme.shapes.medium)
             .background(FeedLoopColors.Tertiary),
         verticalAlignment = Alignment.CenterVertically,
@@ -179,8 +186,8 @@ private fun TimetableHeader(days: List<LocalDate>) {
         Spacer(Modifier.width(railWidth))
         days.forEach { day ->
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(weekdayFormatter.format(day), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = FeedLoopColors.TextPrimary)
-                Text(dayLabelFormatter.format(day), style = MaterialTheme.typography.labelSmall, color = FeedLoopColors.Secondary)
+                Text(weekdayFormatter.format(day), style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), fontWeight = FontWeight.Bold, color = FeedLoopColors.TextPrimary)
+                Text(dayLabelFormatter.format(day), style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = FeedLoopColors.Secondary)
             }
         }
     }
@@ -195,7 +202,7 @@ private fun TimetableBody(
     onOpenSchedule: (String, Long?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val railWidth = 28.dp
+    val railWidth = timetableRailWidth
     val startMinute = startHour * 60
     val endMinute = endHour * 60
     val hourMarks = remember(startHour, endHour) { (startHour..endHour step 2).toList() }
@@ -231,7 +238,7 @@ private fun TimetableBody(
                         modifier = Modifier
                             .width(railWidth)
                             .offset(y = labelOffset(y, bodyHeight)),
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                         color = FeedLoopColors.TextMuted,
                     )
                 }
@@ -288,10 +295,12 @@ private fun TimetableEventBlock(
 
     val visibleMinutes = (visibleRangeEndMinute - visibleRangeStartMinute).toFloat().coerceAtLeast(1f)
     val laneWidth = dayWidth / event.laneCount.toFloat()
-    val top = bodyHeight * ((visibleStartMinute - visibleRangeStartMinute).toFloat() / visibleMinutes) + 2.dp
-    val height = (bodyHeight * ((visibleEndMinute - visibleStartMinute).toFloat() / visibleMinutes) - 4.dp).coerceAtLeast(26.dp)
-    val left = railWidth + (dayWidth * dayIndex.toFloat()) + (laneWidth * event.lane.toFloat()) + 3.dp
-    val width = (laneWidth - 6.dp).coerceAtLeast(12.dp)
+    val top = bodyHeight * ((visibleStartMinute - visibleRangeStartMinute).toFloat() / visibleMinutes) + 1.dp
+    val height = (bodyHeight * ((visibleEndMinute - visibleStartMinute).toFloat() / visibleMinutes) - 2.dp).coerceAtLeast(24.dp)
+    val left = railWidth + (dayWidth * dayIndex.toFloat()) + (laneWidth * event.lane.toFloat()) + 2.dp
+    val width = (laneWidth - 4.dp).coerceAtLeast(12.dp)
+    val showTime = height >= 30.dp && width >= 26.dp
+    val showLocation = height >= 46.dp && width >= 34.dp && !event.occurrence.schedule.location.isNullOrBlank()
 
     Column(
         Modifier
@@ -302,24 +311,35 @@ private fun TimetableEventBlock(
             .background(FeedLoopColors.PrimaryLight)
             .border(1.dp, FeedLoopColors.Primary, MaterialTheme.shapes.small)
             .clickable { onOpenSchedule(event.occurrence.scheduleId, event.occurrence.occurrenceStartAt.takeIf { event.occurrence.isRecurring }) }
-            .padding(horizontal = 5.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            .padding(horizontal = 4.dp, vertical = 3.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
         Text(
             event.occurrence.schedule.title,
-            maxLines = 1,
+            maxLines = if (showTime) 1 else 2,
             overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
             fontWeight = FontWeight.Bold,
             color = FeedLoopColors.TextPrimary,
         )
-        Text(
-            if (event.occurrence.isRecurring) "${formatCompactRange(event.startMinute, event.endMinute)} · 반복" else formatCompactRange(event.startMinute, event.endMinute),
-            maxLines = 1,
-            overflow = TextOverflow.Clip,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-            color = FeedLoopColors.PrimaryDark,
-        )
+        if (showTime) {
+            Text(
+                if (event.occurrence.isRecurring) "${formatCompactRange(event.startMinute, event.endMinute)} · 반복" else formatCompactRange(event.startMinute, event.endMinute),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                color = FeedLoopColors.PrimaryDark,
+            )
+        }
+        if (showLocation) {
+            Text(
+                event.occurrence.schedule.location.orEmpty(),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                color = FeedLoopColors.Secondary,
+            )
+        }
     }
 }
 

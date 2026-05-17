@@ -1,6 +1,8 @@
 package com.lss.onmyplate.nativeplanner.domain.parser
 
+import com.lss.onmyplate.nativeplanner.domain.model.AppointmentParseOutcome
 import com.lss.onmyplate.nativeplanner.domain.model.AppointmentParseResult
+import com.lss.onmyplate.nativeplanner.domain.model.AppointmentParseSource
 import com.lss.onmyplate.nativeplanner.domain.model.TimeConfidence
 import java.time.DayOfWeek
 import java.time.Instant
@@ -32,13 +34,38 @@ class KoreanAppointmentParser(
         "일욜" to DayOfWeek.SUNDAY,
     )
 
-    suspend fun parse(rawText: String, receivedAt: Long): AppointmentParseResult {
-        val local = parseLocally(rawText, receivedAt).withAppointmentDefaults()
-        if (preferLlm) {
-            return llmParser?.parse(rawText, receivedAt)?.mergeFallback(local)?.withAppointmentDefaults() ?: local
+    suspend fun parse(rawText: String, receivedAt: Long): AppointmentParseResult =
+        parseWithOutcome(rawText, receivedAt).result
+
+    suspend fun parseWithOutcome(rawText: String, receivedAt: Long): AppointmentParseOutcome {
+        val localParsed = parseLocally(rawText, receivedAt)
+        if (isDeterministicCompactFallback(rawText, localParsed)) {
+            val local = localParsed.withAppointmentDefaults()
+            return AppointmentParseOutcome(local, AppointmentParseSource.LocalOnly)
         }
-        if (local.startAt != null && local.confidence >= 0.67f) return local
-        return llmParser?.parse(rawText, receivedAt)?.mergeFallback(local)?.withAppointmentDefaults() ?: local
+        val local = localParsed.withAppointmentDefaults()
+        if (preferLlm) {
+            return parseWithLlm(rawText, receivedAt, local)
+        }
+        if (local.startAt != null && local.confidence >= 0.67f) {
+            return AppointmentParseOutcome(local, AppointmentParseSource.LocalOnly)
+        }
+        return parseWithLlm(rawText, receivedAt, local)
+    }
+
+    private suspend fun parseWithLlm(
+        rawText: String,
+        receivedAt: Long,
+        local: AppointmentParseResult,
+    ): AppointmentParseOutcome {
+        val llm = runCatching { llmParser?.parse(rawText, receivedAt) }.getOrNull()
+            ?: return AppointmentParseOutcome(local, AppointmentParseSource.LocalFallback)
+        val source = if (llm.needsLocalSupplement(local)) {
+            AppointmentParseSource.LlmWithLocalSupplement
+        } else {
+            AppointmentParseSource.LlmSuccess
+        }
+        return AppointmentParseOutcome(llm.mergeFallback(local).withAppointmentDefaults(), source)
     }
 
     private fun parseLocally(rawText: String, receivedAt: Long): AppointmentParseResult {
@@ -51,16 +78,33 @@ class KoreanAppointmentParser(
         } else {
             null
         }
+        val endAt = if (date != null && timeParse.time != null && timeParse.endTime != null) {
+            val endDate = if (timeParse.endTime.isAfter(timeParse.time)) date else date.plusDays(1)
+            LocalDateTime.of(endDate, timeParse.endTime).atZone(zoneId).toInstant().toEpochMilli()
+        } else {
+            null
+        }
         val confidence = listOfNotNull(date, timeParse.time, location).size / 3f
         return AppointmentParseResult(
             title = "",
             startAt = startAt,
-            endAt = null,
+            endAt = endAt,
             location = location,
             confidence = confidence,
             timeConfidence = timeParse.confidence,
         )
     }
+
+    private fun isDeterministicCompactFallback(rawText: String, local: AppointmentParseResult): Boolean =
+        rawText.trimStart().startsWith("fallback", ignoreCase = true) &&
+            local.startAt != null &&
+            local.endAt != null &&
+            !local.location.isNullOrBlank()
+
+    private fun AppointmentParseResult.needsLocalSupplement(fallback: AppointmentParseResult): Boolean =
+        (startAt == null && fallback.startAt != null) ||
+            (endAt == null && startAt == null && fallback.endAt != null) ||
+            (location == null && fallback.location != null)
 
     private fun AppointmentParseResult.mergeFallback(fallback: AppointmentParseResult): AppointmentParseResult {
         val mergedStartAt = startAt ?: fallback.startAt
@@ -92,6 +136,13 @@ class KoreanAppointmentParser(
             return if (candidate.isBefore(baseDate)) candidate.plusYears(1) else candidate
         }
 
+        Regex("\\b(\\d{1,2})/(\\d{1,2})\\b").find(text)?.let {
+            val month = it.groupValues[1].toInt()
+            val day = it.groupValues[2].toInt()
+            val candidate = LocalDate.of(baseDate.year, month, day)
+            return if (candidate.isBefore(baseDate)) candidate.plusYears(1) else candidate
+        }
+
         val weekOffset = when {
             "다음 주" in text || "담주" in text -> 1L
             "이번 주" in text -> 0L
@@ -112,6 +163,8 @@ class KoreanAppointmentParser(
 
     private fun parseTime(text: String): TimeParse {
         val normalizedText = normalizeKoreanHourNumbers(text)
+        parseCompactTimeRange(normalizedText)?.let { return it }
+
         val colonTime = Regex("(오전|오후|저녁|밤)?\\s*(\\d{1,2})[:：](\\d{2})").find(normalizedText)
         if (colonTime != null) {
             val meridiem = colonTime.groupValues[1]
@@ -119,7 +172,7 @@ class KoreanAppointmentParser(
             val minute = colonTime.groupValues[3].toInt()
             if ((meridiem == "오후" || meridiem == "저녁" || meridiem == "밤") && hour < 12) hour += 12
             if (meridiem == "오전" && hour == 12) hour = 0
-            return TimeParse(LocalTime.of(hour.coerceIn(0, 23), minute.coerceIn(0, 59)), TimeConfidence.High)
+            return TimeParse(LocalTime.of(hour.coerceIn(0, 23), minute.coerceIn(0, 59)), null, TimeConfidence.High)
         }
 
         val explicit = Regex("(오전|오후|아침|점심|저녁|밤)?\\s*(\\d{1,2})시(?:\\s*(\\d{1,2})분|\\s*반)?").find(normalizedText)
@@ -134,17 +187,41 @@ class KoreanAppointmentParser(
             if ((meridiem == "오후" || meridiem == "저녁" || meridiem == "밤") && hour < 12) hour += 12
             if (meridiem == "오전" && hour == 12) hour = 0
             if (meridiem.isBlank() && hour in 1..7) {
-                return TimeParse(LocalTime.of(hour, minute), TimeConfidence.Medium)
+                return TimeParse(LocalTime.of(hour, minute), null, TimeConfidence.Medium)
             }
-            return TimeParse(LocalTime.of(hour.coerceIn(0, 23), minute.coerceIn(0, 59)), TimeConfidence.High)
+            return TimeParse(LocalTime.of(hour.coerceIn(0, 23), minute.coerceIn(0, 59)), null, TimeConfidence.High)
         }
 
         return when {
-            "아침" in text -> TimeParse(LocalTime.of(8, 0), TimeConfidence.Low)
-            "점심" in text -> TimeParse(LocalTime.of(12, 0), TimeConfidence.Low)
-            "저녁" in text -> TimeParse(LocalTime.of(19, 0), TimeConfidence.Low)
-            else -> TimeParse(null, TimeConfidence.Low)
+            "아침" in text -> TimeParse(LocalTime.of(8, 0), null, TimeConfidence.Low)
+            "점심" in text -> TimeParse(LocalTime.of(12, 0), null, TimeConfidence.Low)
+            "저녁" in text -> TimeParse(LocalTime.of(19, 0), null, TimeConfidence.Low)
+            else -> TimeParse(null, null, TimeConfidence.Low)
         }
+    }
+
+    private fun parseCompactTimeRange(text: String): TimeParse? {
+        val match = Regex("\\b(\\d{1,2})(?::?(\\d{2}))\\s*[-~]\\s*(\\d{1,2})(?::?(\\d{2}))\\b").find(text)
+            ?: return null
+        val start = compactTime(match.groupValues[1], match.groupValues[2]) ?: return null
+        val end = compactTime(match.groupValues[3], match.groupValues[4]) ?: return null
+        return TimeParse(start, end, TimeConfidence.High)
+    }
+
+    private fun compactTime(hourPart: String, minutePart: String): LocalTime? {
+        val hour: Int
+        val minute: Int
+        if (minutePart.isNotBlank()) {
+            hour = hourPart.toInt()
+            minute = minutePart.toInt()
+        } else if (hourPart.length in 3..4) {
+            hour = hourPart.dropLast(2).toInt()
+            minute = hourPart.takeLast(2).toInt()
+        } else {
+            return null
+        }
+        if (hour !in 0..23 || minute !in 0..59) return null
+        return LocalTime.of(hour, minute)
     }
 
     private fun normalizeKoreanHourNumbers(text: String): String {
@@ -168,12 +245,13 @@ class KoreanAppointmentParser(
     }
 
     private fun parseLocation(text: String): String? {
-        val normalizedText = normalizeKoreanHourNumbers(text)
+        val normalizedText = normalizeKoreanHourNumbers(text).replace(Regex("^\\s*fallback\\b", RegexOption.IGNORE_CASE), "")
         Regex("(?:장소|위치)[:：]?\\s*([^\\n,]+)").find(text)?.let {
             return it.groupValues[1].trim().takeIf { value -> value.isNotBlank() }?.take(40)
         }
         val cleaned = normalizedText
-            .replace(Regex("(오늘|내일|모레|이번 주|다음 주|담주|\\d{1,2}월\\s*\\d{1,2}일)"), "")
+            .replace(Regex("(오늘|내일|모레|이번 주|다음 주|담주|\\d{1,2}월\\s*\\d{1,2}일|\\b\\d{1,2}/\\d{1,2}\\b)"), "")
+            .replace(Regex("\\b\\d{1,2}:?\\d{2}\\s*[-~]\\s*\\d{1,2}:?\\d{2}\\b"), "")
             .replace(Regex(weekdayMap.keys.joinToString("|") { Regex.escape(it) }), "")
             .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}[:：]\\d{2}"), "")
             .replace(Regex("(오전|오후|아침|점심|저녁|밤)?\\s*\\d{1,2}시(?:\\s*\\d{1,2}분|\\s*반)?"), "")
@@ -197,5 +275,5 @@ class KoreanAppointmentParser(
             ?.take(40)
     }
 
-    private data class TimeParse(val time: LocalTime?, val confidence: TimeConfidence)
+    private data class TimeParse(val time: LocalTime?, val endTime: LocalTime?, val confidence: TimeConfidence)
 }

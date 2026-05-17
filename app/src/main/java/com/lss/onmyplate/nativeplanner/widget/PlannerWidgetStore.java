@@ -17,4 +17,11 @@ public final class PlannerWidgetStore {
         getPrefs(context).edit().putString(KEY_SUMMARY_SNAPSHOT, snapshotJson).commit();
         SummaryWidgetProvider.refreshAll(context);
     }
+
+    static void saveSummarySnapshot(Context context, String snapshotJson, boolean refreshWidgets) {
+        getPrefs(context).edit().putString(KEY_SUMMARY_SNAPSHOT, snapshotJson).commit();
+        if (refreshWidgets) {
+            SummaryWidgetProvider.refreshAll(context);
+        }
+    }
 }

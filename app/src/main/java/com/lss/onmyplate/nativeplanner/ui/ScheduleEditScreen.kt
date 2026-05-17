@@ -1,5 +1,6 @@
 ﻿package com.lss.onmyplate.nativeplanner.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -32,8 +33,25 @@ fun ScheduleEditScreen(
     var status by remember(schedule?.id) { mutableStateOf(scheduleStatusFromDb(schedule?.status)) }
     var recurrenceState by remember(schedule?.id) { mutableStateOf(RecurrenceUiState()) }
     var message by remember { mutableStateOf<String?>(null) }
+    var actionInFlight by remember { mutableStateOf(false) }
     val recurrenceInput = recurrenceState.toRecurrenceInput()
-    val canSave = title.isNotBlank() && startAt != null && recurrenceInput != null
+    val canSave = !actionInFlight && title.isNotBlank() && startAt != null && recurrenceInput != null
+    val deleteWholeSchedule: () -> Unit = {
+        scope.launch {
+            actionInFlight = true
+            message = null
+            runCatching {
+                repository.deleteSchedule(scheduleId)
+            }.onSuccess {
+                onBack()
+            }.onFailure {
+                message = "일정 삭제에 실패했습니다. 네트워크를 확인해주세요."
+                actionInFlight = false
+            }
+        }
+    }
+
+    BackHandler { onBack() }
 
     LaunchedEffect(schedule?.id) {
         val loadedSchedule = schedule ?: return@LaunchedEffect
@@ -42,7 +60,12 @@ fun ScheduleEditScreen(
     }
 
     if (schedule == null) {
-        Box(Modifier.fillMaxSize().padding(16.dp)) { Text("일정을 찾을 수 없습니다.") }
+        Box(Modifier.fillMaxSize().padding(16.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("일정을 찾을 수 없습니다.")
+                TextButton(onClick = onBack) { Text("← 돌아가기") }
+            }
+        }
         return
     }
 
@@ -51,17 +74,24 @@ fun ScheduleEditScreen(
             .fillMaxSize()
             .background(Brush.verticalGradient(listOf(FeedLoopColors.Background, FeedLoopColors.Surface)))
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onBack) { Text("← 일정") }
-            Text("일정 수정", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(64.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onBack, enabled = !actionInFlight) { Text("← 일정") }
+            Text(
+                "일정 수정",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = deleteWholeSchedule, enabled = !actionInFlight) {
+                Text("삭제", color = FeedLoopColors.Error, style = MaterialTheme.typography.labelLarge)
+            }
         }
 
         Card(Modifier.fillMaxWidth(), colors = FeedLoopCardColors(), border = BorderStroke(1.dp, FeedLoopColors.Border), elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation)) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PlannerTextField(title, { title = it }, "제목")
                 DateTimePickerField(startAt, { startAt = it }, "시작 날짜/시간")
                 DateTimePickerField(endAt, { endAt = it }, "종료 날짜/시간", required = false)
@@ -71,22 +101,21 @@ fun ScheduleEditScreen(
                     onValueChange = { memo = it },
                     label = { Text("메모") },
                     modifier = Modifier.fillMaxWidth(),
-                    minLines = 3,
+                    minLines = 1,
+                    maxLines = 2,
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = FeedLoopColors.PrimaryDark, unfocusedBorderColor = FeedLoopColors.Border, focusedLabelColor = FeedLoopColors.PrimaryDark, cursorColor = FeedLoopColors.PrimaryDark),
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ScheduleStatus.entries.forEach { item ->
+                        FilterChip(
+                            selected = status == item,
+                            onClick = { status = item },
+                            label = { Text(statusLabel(item), style = MaterialTheme.typography.labelMedium) },
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = FeedLoopColors.PendingBg, selectedLabelColor = FeedLoopColors.Pending, containerColor = FeedLoopColors.Surface),
+                        )
+                    }
+                }
                 RecurrenceControls(recurrenceState, { recurrenceState = it })
-            }
-        }
-
-        Text("상태", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ScheduleStatus.entries.forEach { item ->
-                FilterChip(
-                    selected = status == item,
-                    onClick = { status = item },
-                    label = { Text(statusLabel(item)) },
-                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = FeedLoopColors.PendingBg, selectedLabelColor = FeedLoopColors.Pending, containerColor = FeedLoopColors.Surface),
-                )
             }
         }
 
@@ -96,33 +125,55 @@ fun ScheduleEditScreen(
             OutlinedButton(
                 onClick = {
                     scope.launch {
-                        repository.skipRecurringOccurrence(scheduleId, occurrenceStartAt)
-                        onBack()
+                        actionInFlight = true
+                        message = null
+                        runCatching {
+                            repository.skipRecurringOccurrence(scheduleId, occurrenceStartAt)
+                        }.onSuccess {
+                            onBack()
+                        }.onFailure {
+                            message = "이번 반복 일정 삭제에 실패했습니다. 네트워크를 확인해주세요."
+                            actionInFlight = false
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 border = BorderStroke(1.dp, FeedLoopColors.WarningBorder),
+                enabled = !actionInFlight,
             ) {
-                Text("이번 반복 건너뛰기")
+                Text("이번 일정만 삭제")
             }
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f), border = BorderStroke(1.dp, FeedLoopColors.Border)) { Text("취소") }
+            OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f), border = BorderStroke(1.dp, FeedLoopColors.Border), enabled = !actionInFlight) { Text("취소") }
             Button(
                 onClick = {
                     scope.launch {
-                        val ok = repository.updateSchedule(
-                            scheduleId = scheduleId,
-                            title = title,
-                            startAt = startAt,
-                            endAt = endAt,
-                            location = location,
-                            memo = memo,
-                            status = status,
-                            recurrenceInput = recurrenceInput ?: return@launch,
-                        )
-                        if (ok) onBack() else message = "제목과 시작 시간을 확인해주세요."
+                        actionInFlight = true
+                        message = null
+                        runCatching {
+                            repository.updateSchedule(
+                                scheduleId = scheduleId,
+                                title = title,
+                                startAt = startAt,
+                                endAt = endAt,
+                                location = location,
+                                memo = memo,
+                                status = status,
+                                recurrenceInput = recurrenceInput ?: return@launch,
+                            )
+                        }.onSuccess { ok ->
+                            if (ok) {
+                                onBack()
+                            } else {
+                                message = "제목과 시작 시간을 확인해주세요."
+                                actionInFlight = false
+                            }
+                        }.onFailure {
+                            message = "일정 저장에 실패했습니다. 네트워크를 확인해주세요."
+                            actionInFlight = false
+                        }
                     }
                 },
                 modifier = Modifier.weight(1.2f),

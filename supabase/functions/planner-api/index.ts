@@ -13,6 +13,16 @@ type FeedbackPayload = {
   appVersionName: string;
   appVersionCode: number;
 };
+
+const CANDIDATE_PARSE_SOURCES = new Set([
+  "llm_success",
+  "llm_with_local_supplement",
+  "local_fallback",
+  "parser_error",
+  "local_only",
+  "unknown",
+]);
+
 type RecurrenceRuleInput = {
   frequency: "daily" | "weekly" | "monthly";
   interval: number;
@@ -37,7 +47,7 @@ const PUBLIC_ID_PREFIX = "pb";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
 };
 
 const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -94,6 +104,7 @@ Deno.serve(async (request) => {
       const scheduleId = decodeURIComponent(personalScheduleMatch[1]);
       if (method === "GET") return await getPersonalSchedule(userId, scheduleId);
       if (method === "PATCH") return await updatePersonalSchedule(userId, scheduleId, request);
+      if (method === "DELETE") return await deletePersonalSchedule(userId, scheduleId);
     }
 
     const personalScheduleExceptionMatch = path.match(/^\/api\/planner\/schedules\/([^/]+)\/recurrence-exceptions$/);
@@ -451,6 +462,17 @@ async function updatePersonalSchedule(userId: string, scheduleId: string, reques
   return jsonResponse({ schedule: toScheduleJson(withRecurrence[0]) });
 }
 
+async function deletePersonalSchedule(userId: string, scheduleId: string): Promise<Response> {
+  await personalScheduleForUser(userId, scheduleId);
+  const { error } = await db
+    .from("planner_personal_schedules")
+    .delete()
+    .eq("id", scheduleId)
+    .eq("created_by", userId);
+  if (error) throw apiError(500, error.message);
+  return jsonResponse({ ok: true });
+}
+
 async function addPersonalScheduleRecurrenceException(userId: string, scheduleId: string, request: Request): Promise<Response> {
   await personalScheduleForUser(userId, scheduleId);
   const body = await readJson(request);
@@ -677,7 +699,16 @@ async function requireUserId(request: Request): Promise<string> {
   const header = request.headers.get("authorization") ?? "";
   const match = header.match(/^Bearer\s+(.+)$/i);
   if (!match) throw apiError(401, "로그인이 필요합니다.");
-  return normalizeIdentifier(match[1].trim());
+
+  const userId = normalizeIdentifier(match[1].trim());
+  const { data, error } = await db
+    .from("planner_users")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw apiError(500, error.message);
+  if (!data) throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
+  return userId;
 }
 
 function optionalUserId(request: Request): string | null {
@@ -727,6 +758,7 @@ function readCandidatePayload(body: Record<string, unknown>): Record<string, unk
   if (status !== "pending" && status !== "confirmed" && status !== "discarded") {
     throw apiError(400, "Invalid candidate status.");
   }
+  const parseSource = readCandidateParseSource(body.parseSource);
   return {
     local_candidate_id: optionalString(body.localCandidateId),
     raw_text: requiredString(body.rawText, "?쎌냽 ?띿뒪?몄? ?꾩슂?⑸땲??"),
@@ -737,10 +769,19 @@ function readCandidatePayload(body: Record<string, unknown>): Record<string, unk
     extracted_location: optionalString(body.extractedLocation),
     confidence: typeof body.confidence === "number" ? body.confidence : 0,
     time_confidence: optionalString(body.timeConfidence) ?? "",
+    parse_source: parseSource,
     status,
     created_at: optionalString(body.createdAt) ?? new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
+}
+
+function readCandidateParseSource(value: unknown): string {
+  const parseSource = optionalString(value) ?? "unknown";
+  if (!CANDIDATE_PARSE_SOURCES.has(parseSource)) {
+    throw apiError(400, "Invalid candidate parse source.");
+  }
+  return parseSource;
 }
 
 function readRecurrenceRule(value: unknown): RecurrenceRuleInput | null {
@@ -961,6 +1002,7 @@ function toCandidateJson(candidate: Record<string, unknown>): JsonObject {
     extractedLocation: optionalString(candidate.extracted_location),
     confidence: Number(candidate.confidence ?? 0),
     timeConfidence: optionalString(candidate.time_confidence) ?? "",
+    parseSource: optionalString(candidate.parse_source) ?? "unknown",
     status: optionalString(candidate.status) ?? "pending",
     createdAt: optionalString(candidate.created_at),
     updatedAt: optionalString(candidate.updated_at),

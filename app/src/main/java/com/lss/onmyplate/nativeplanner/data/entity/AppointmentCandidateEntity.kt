@@ -12,4 +12,5 @@ data class AppointmentCandidateEntity(
     val timeConfidence: String,
     val status: String,
     val createdAt: Long,
+    val parseSource: String = "unknown",
 )

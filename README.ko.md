@@ -82,3 +82,11 @@ Unix 계열 셸에서는 다음을 사용합니다.
 Android 앱은 앱 로그인, 후보 저장, 개인 일정, 위젯 동기화, 공유에 단일 Supabase Edge Function `planner-api`를 사용합니다. `.env` 또는 CI에서 `PLANNER_API_BASE_URL`을 `https://<project-ref>.supabase.co/functions/v1/planner-api`로 설정합니다. Supabase Auth는 사용하지 않습니다. `planner-api`는 첫 로그인 때 자체 `planner_users` row를 만들고, 비밀번호는 user id로 salt 처리한 해시만 저장하며, user id를 앱 세션 토큰으로 반환한 뒤 서버 전용 service-role 권한으로 Supabase에 씁니다.
 
 Android never stores service-role credentials, does not read the old `on_my_plate_native.db` Room database, and no longer depends on any PC-local backend. Shared-screen-only dummy schedules are read from `planner_dummy_schedules` through the API and are never stored in personal schedules or the widget. See `docs/supabaseSQL.md` for the server-side schema and RLS posture.
+
+`supabase/functions/planner-api/index.ts`가 바뀌면 앱 테스트나 릴리스 전에 Edge Function을 다시 배포합니다.
+
+```powershell
+supabase functions deploy planner-api --use-api --no-verify-jwt --project-ref gznuqhjenzeucpmonesl
+```
+
+앱은 Supabase Auth JWT가 아니라 자체 `Authorization: Bearer <userId>` 세션 토큰을 보내므로 `--no-verify-jwt` / `verify_jwt = false`를 유지해야 합니다. 배포 후에는 `PLANNER_API_BASE_URL` 기준으로 API smoke test를 실행합니다. 유효한 형식의 fake bearer token은 `401`을 반환해야 하고, 실제 또는 임시 로그인 token은 `GET /api/planner/candidates?status=pending`에서 `200`을 반환해야 합니다. 후보 생성 경로를 바꾼 경우 `POST /api/planner/candidates`도 `200`인지 확인한 뒤 임시 smoke-test row를 정리합니다.
