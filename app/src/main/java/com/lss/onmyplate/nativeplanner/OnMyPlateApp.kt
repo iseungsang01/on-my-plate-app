@@ -24,9 +24,11 @@ class OnMyPlateApp : Application() {
     val parser by lazy {
         KoreanAppointmentParser(
             llmParser = GeminiAppointmentParser(
-                apiKey = BuildConfig.GEMINI_API_KEY,
-                model = BuildConfig.GEMINI_MODEL,
-                baseUrl = BuildConfig.GEMINI_API_BASE_URL,
+                apiBaseUrl = BuildConfig.PLANNER_API_BASE_URL,
+                sessionTokenProvider = {
+                    getSharedPreferences(BuildConfig.PLANNER_SESSION_PREFS_NAME, MODE_PRIVATE)
+                        .getString(BuildConfig.PLANNER_SESSION_TOKEN_KEY, null)
+                },
                 diagnostics = { message, error ->
                     if (error == null) Log.w(TAG, message) else Log.w(TAG, message, error)
                 },

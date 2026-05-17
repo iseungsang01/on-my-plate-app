@@ -75,6 +75,10 @@ The native Android widget is part of this MVP and renders the signed-in user's p
 - Play publishing also requires `PLAY_SERVICE_ACCOUNT_JSON_PATH`; `PLAY_TRACK` defaults to `internal` and `PLAY_RELEASE_STATUS` defaults to `DRAFT`.
 - Upload with `publishAab`; for user-visible updates, publish to a Play track with a non-draft release status.
 
+## Gemini parser proxy
+
+Android app calls the planner-api parser endpoint instead of Gemini directly. Keep `GEMINI_API_KEY`, `GEMINI_MODEL`, and `GEMINI_API_BASE_URL` as Supabase Edge Function secrets/env only; do not ship them in Android `BuildConfig`.
+
 ## Supabase Edge Function planner API
 
 The Android app uses a single Supabase Edge Function, `planner-api`, for app login, candidate storage, personal schedules, widget sync, and sharing. Configure `PLANNER_API_BASE_URL` in `.env` (or CI env) as `https://<project-ref>.supabase.co/functions/v1/planner-api`. Supabase Auth is not used; `planner-api` uses the app's own `planner_users` rows, creates a user row on first login, stores only a user-id salted password hash, returns the user id as the app session token, and then writes to Supabase with server-only service-role credentials.

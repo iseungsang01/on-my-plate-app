@@ -55,13 +55,6 @@ android {
         targetSdk = 35
         versionCode = envOrDotenv("ANDROID_VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = envOrDotenv("ANDROID_VERSION_NAME") ?: "0.1.0"
-        buildConfigField("String", "GEMINI_API_KEY", "\"${envOrDotenv("GEMINI_API_KEY").orEmpty()}\"")
-        buildConfigField("String", "GEMINI_MODEL", "\"${envOrDotenv("GEMINI_MODEL") ?: "gemma-4-26b-it"}\"")
-        buildConfigField(
-            "String",
-            "GEMINI_API_BASE_URL",
-            "\"${envOrDotenv("GEMINI_API_BASE_URL") ?: "https://generativelanguage.googleapis.com/v1beta"}\"",
-        )
         buildConfigField(
             "String",
             "PLANNER_API_BASE_URL",
