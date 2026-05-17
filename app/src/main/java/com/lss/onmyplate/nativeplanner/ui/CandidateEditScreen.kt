@@ -177,8 +177,9 @@ fun CandidateEditScreen(
                                 is SaveResult.SavedAsUncertain -> onDone()
                                 else -> onDone()
                             }
-                        }.onFailure {
-                            actionError = "Unable to save. Check the network and try again."
+                        }.onFailure { error ->
+                            actionError = error.message?.takeIf { it.isNotBlank() }
+                                ?: "저장에 실패했습니다. 네트워크와 로그인 상태를 확인해 주세요."
                             actionInFlight = false
                         }
                     }

@@ -65,7 +65,9 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
         savedScheduleRange(savedFilter, today, customStartDate, customEndDate)
     }
     val pendingCandidates by repository.observePendingCandidates().collectAsState(initial = emptyList())
-    val savedSchedules by repository.observeExpandedSchedules(savedRange.first, savedRange.second).collectAsState(initial = emptyList())
+    
+    val runtimeState by repository.runtimeState.collectAsState()
+val savedSchedules by repository.observeExpandedSchedules(savedRange.first, savedRange.second).collectAsState(initial = emptyList())
 
     Box(
         Modifier

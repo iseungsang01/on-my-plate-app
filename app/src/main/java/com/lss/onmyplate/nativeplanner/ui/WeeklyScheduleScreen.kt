@@ -53,6 +53,7 @@ fun WeeklyScheduleScreen(repository: PlannerRepository, onOpenSchedule: (String,
     val rangeStart = remember(days) { days.first().atStartOfDay(scheduleZone).toInstant().toEpochMilli() }
     val rangeEnd = remember(days) { days.last().plusDays(1).atStartOfDay(scheduleZone).toInstant().toEpochMilli() }
     val schedules by repository.observeExpandedSchedules(rangeStart, rangeEnd).collectAsState(initial = emptyList())
+    val runtimeState by repository.runtimeState.collectAsState()
     val schedulesByDay = remember(schedules, days) {
         days.associateWith { day -> schedules.filter { it.localDate() == day } }
     }
@@ -63,6 +64,30 @@ fun WeeklyScheduleScreen(repository: PlannerRepository, onOpenSchedule: (String,
             .background(Brush.verticalGradient(listOf(FeedLoopColors.Background, FeedLoopColors.PrimaryLight.copy(alpha = 0.45f))))
     ) {
         Column(Modifier.fillMaxSize().padding(12.dp)) {
+            runtimeState.errorMessage?.let { message ->
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    colors = CardDefaults.cardColors(containerColor = FeedLoopColors.ErrorBg),
+                    border = BorderStroke(1.dp, FeedLoopColors.Error.copy(alpha = 0.35f)),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "일정 동기화 실패: $message",
+                            color = FeedLoopColors.Error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { repository.clearRuntimeError() }) { Text("닫기") }
+                    }
+                }
+            }
+            if (runtimeState.loading && schedules.isEmpty()) {
+                LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 8.dp))
+            }
             WeeklyTimetableWidget(
                 days = days,
                 schedulesByDay = schedulesByDay,

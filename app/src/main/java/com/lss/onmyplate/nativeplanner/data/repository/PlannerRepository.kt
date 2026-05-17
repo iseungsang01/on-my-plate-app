@@ -19,6 +19,7 @@ import com.lss.onmyplate.nativeplanner.domain.parser.KoreanAppointmentParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
@@ -47,6 +48,11 @@ private data class RecentCandidateCreate(
     val candidate: AppointmentCandidateEntity,
 )
 
+data class PlannerRuntimeState(
+    val loading: Boolean = false,
+    val errorMessage: String? = null,
+)
+
 class PlannerRepository(
     context: Context,
     private val parser: KoreanAppointmentParser,
@@ -54,6 +60,8 @@ class PlannerRepository(
     private val appContext = context.applicationContext
     private val createCandidateMutex = Mutex()
     private val saveCandidateMutex = Mutex()
+    private val _runtimeState = MutableStateFlow(PlannerRuntimeState())
+    val runtimeState: StateFlow<PlannerRuntimeState> = _runtimeState
     private var recentCandidateCreate: RecentCandidateCreate? = null
     private val sessionPrefs = appContext.getSharedPreferences(BuildConfig.PLANNER_SESSION_PREFS_NAME, Context.MODE_PRIVATE)
     private val client = PlannerApiClient(BuildConfig.PLANNER_API_BASE_URL) { clearCachedSession() }
@@ -83,6 +91,10 @@ class PlannerRepository(
 
     suspend fun getCandidate(id: String): AppointmentCandidateEntity? =
         refreshCandidate(id) ?: candidateRecords.value[id] ?: pendingCandidates.value.firstOrNull { it.id == id }
+
+    fun clearRuntimeError() {
+        _runtimeState.value = _runtimeState.value.copy(errorMessage = null)
+    }
 
     suspend fun getSchedules(): List<ScheduleEntity> = refreshSchedules().map { it.schedule }
 
@@ -131,6 +143,7 @@ class PlannerRepository(
             }
         } catch (error: Throwable) {
             Log.e(TAG, "createCandidate API save failed. ${localCandidate.diagnosticSummary()}", error)
+            recordRuntimeError(error)
             throw error
         }
         Log.i(TAG, "createCandidate API save succeeded. candidateId=${saved.id}, status=${saved.status}")
@@ -291,32 +304,91 @@ class PlannerRepository(
     }
 
     suspend fun refreshSchedules(rangeStart: Long? = null, rangeEnd: Long? = null): List<ScheduleRecord> {
-        val records = withContext(Dispatchers.IO) { client.listSchedules(sessionToken(), rangeStart, rangeEnd) }
-        scheduleRecords.value = mergeScheduleRecords(scheduleRecords.value, records)
-        return records
+        beginRuntimeLoading()
+        return try {
+            val records = withContext(Dispatchers.IO) { client.listSchedules(sessionToken(), rangeStart, rangeEnd) }
+            scheduleRecords.value = mergeScheduleRecords(scheduleRecords.value, records)
+            clearRuntimeLoading()
+            records
+        } catch (error: Throwable) {
+            recordRuntimeError(error)
+            throw error
+        }
     }
 
     private suspend fun refreshSchedule(id: String): ScheduleRecord? {
-        val record = withContext(Dispatchers.IO) { client.getSchedule(sessionToken(), id) }
-        if (record != null) scheduleRecords.value = mergeScheduleRecords(scheduleRecords.value, listOf(record))
-        return record
+        beginRuntimeLoading()
+        return try {
+            val record = withContext(Dispatchers.IO) { client.getSchedule(sessionToken(), id) }
+            if (record != null) scheduleRecords.value = mergeScheduleRecords(scheduleRecords.value, listOf(record))
+            clearRuntimeLoading()
+            record
+        } catch (error: Throwable) {
+            recordRuntimeError(error)
+            throw error
+        }
     }
 
     private suspend fun refreshPendingCandidates(): List<AppointmentCandidateEntity> {
-        val candidates = withContext(Dispatchers.IO) { client.listPendingCandidates(sessionToken()) }
-        pendingCandidates.value = candidates
-        candidateRecords.value = candidateRecords.value + candidates.associateBy { it.id }
-        return candidates
+        beginRuntimeLoading()
+        return try {
+            val candidates = withContext(Dispatchers.IO) { client.listPendingCandidates(sessionToken()) }
+            pendingCandidates.value = candidates
+            candidateRecords.value = candidateRecords.value + candidates.associateBy { it.id }
+            clearRuntimeLoading()
+            candidates
+        } catch (error: Throwable) {
+            recordRuntimeError(error)
+            throw error
+        }
     }
 
     private suspend fun refreshCandidate(id: String): AppointmentCandidateEntity? {
-        val candidate = withContext(Dispatchers.IO) { client.getCandidate(sessionToken(), id) }
-        if (candidate != null) rememberCandidate(candidate)
-        return candidate
+        beginRuntimeLoading()
+        return try {
+            val candidate = withContext(Dispatchers.IO) { client.getCandidate(sessionToken(), id) }
+            if (candidate != null) rememberCandidate(candidate)
+            clearRuntimeLoading()
+            candidate
+        } catch (error: Throwable) {
+            recordRuntimeError(error)
+            throw error
+        }
     }
 
     private fun rememberCandidate(candidate: AppointmentCandidateEntity) {
         candidateRecords.value = candidateRecords.value + (candidate.id to candidate)
+    }
+
+    private fun beginRuntimeLoading() {
+        _runtimeState.value = _runtimeState.value.copy(loading = true)
+    }
+
+    private fun clearRuntimeLoading() {
+        _runtimeState.value = PlannerRuntimeState()
+    }
+
+    private fun recordRuntimeError(error: Throwable) {
+        _runtimeState.value = PlannerRuntimeState(
+            loading = false,
+            errorMessage = userFacingError(error),
+        )
+    }
+
+    private fun userFacingError(error: Throwable): String {
+        val raw = error.message.orEmpty()
+        return when {
+            raw.contains("Login is required", ignoreCase = true) ||
+                raw.contains("로그인", ignoreCase = true) ||
+                raw.contains("401") -> "로그인이 만료되었습니다. 다시 로그인해 주세요."
+            raw.contains("timeout", ignoreCase = true) ||
+                raw.contains("timed out", ignoreCase = true) -> "요청 시간이 초과되었습니다. 네트워크 상태를 확인해 주세요."
+            raw.contains("Unable to resolve host", ignoreCase = true) ||
+                raw.contains("Failed to connect", ignoreCase = true) ||
+                raw.contains("Connection", ignoreCase = true) -> "서버에 연결할 수 없습니다. 네트워크를 확인해 주세요."
+            raw.isNotBlank() -> raw.take(180)
+            else -> "요청 처리 중 오류가 발생했습니다."
+        }
     }
 
     private fun AppointmentCandidateEntity.diagnosticSummary(): String =
