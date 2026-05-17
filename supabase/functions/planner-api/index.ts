@@ -1,3 +1,5 @@
+/// <reference lib="deno.ns" />
+
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
@@ -77,8 +79,8 @@ Deno.serve(async (request) => {
     if (method === "POST" && path === "/api/auth/password") return await changePassword(request);
 
     if (method === "POST" && path === "/api/parser/appointment") {
-      const userId = await requireUserId(request);
-      return await parseAppointment(request, userId);
+      await requireUserId(request);
+      return await parseAppointment(request);
     }
 
     if (method === "POST" && path === "/api/planner/share/profile") {
@@ -166,7 +168,7 @@ function normalizePath(pathname: string): string {
   return stripped.startsWith("/") ? stripped : `/${stripped}`;
 }
 
-async function parseAppointment(request: Request, userId: string): Promise<Response> {
+async function parseAppointment(request: Request): Promise<Response> {
   if (!GEMINI_API_KEY) throw apiError(500, "Gemini API key is not configured.");
   const body = await readJson(request);
   const rawText = requiredString(body.rawText, "파싱할 텍스트가 필요합니다.");
@@ -228,7 +230,8 @@ function parseGeminiAppointmentResponse(responseText: string): JsonObject {
   const candidates = Array.isArray(root.candidates) ? root.candidates : [];
   const first = candidates[0] as Record<string, unknown> | undefined;
   const content = first?.content as Record<string, unknown> | undefined;
-  const parts = Array.isArray(content?.parts) ? content?.parts : [];
+  const rawParts = content?.["parts"];
+  const parts = Array.isArray(rawParts) ? rawParts : [];
   const firstPart = parts[0] as Record<string, unknown> | undefined;
   const raw = typeof firstPart?.text === "string" ? firstPart.text.trim() : "";
   if (!raw) throw apiError(502, "Gemini response did not contain parse JSON.");
@@ -430,9 +433,19 @@ async function hashSessionToken(token: string): Promise<string> {
 }
 
 function base64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let output = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const first = bytes[index];
+    const second = bytes[index + 1];
+    const third = bytes[index + 2];
+
+    output += alphabet[first >> 2];
+    output += alphabet[((first & 0x03) << 4) | ((second ?? 0) >> 4)];
+    output += index + 1 < bytes.length ? alphabet[((second & 0x0f) << 2) | ((third ?? 0) >> 6)] : "=";
+    output += index + 2 < bytes.length ? alphabet[(third ?? 0) & 0x3f] : "=";
+  }
+  return output.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 async function profile(userId: string): Promise<Response> {
