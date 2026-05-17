@@ -84,7 +84,8 @@ The Android app never stores service-role credentials, does not read the old `on
 When `supabase/functions/planner-api/index.ts` changes, redeploy the Edge Function before testing or releasing the app:
 
 ```powershell
-supabase functions deploy planner-api --use-api --no-verify-jwt --project-ref gznuqhjenzeucpmonesl
+supabase functions deploy planner-api --use-api --no-verify-jwt --project-ref <your-project-ref>
 ```
+Keep the actual project ref, service-role key, Play service account JSON, and signing credentials outside the repository.
 
 Keep `--no-verify-jwt` / `verify_jwt = false` because the app sends its own `Authorization: Bearer <userId>` session token instead of a Supabase Auth JWT. After every deploy, run API smoke checks against `PLANNER_API_BASE_URL`: a valid-format fake bearer token must return `401`, and a real or disposable login token must return `200` from `GET /api/planner/candidates?status=pending`. For candidate-intake changes, also verify `POST /api/planner/candidates` returns `200` and then clean up any disposable smoke-test rows.

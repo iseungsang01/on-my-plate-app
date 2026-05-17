@@ -27,6 +27,13 @@ class ShareReceiverActivity : Activity() {
             return
         }
 
+        if (sharedText.length > MAX_SHARED_TEXT_LENGTH) {
+            Log.w(TAG, "Ignoring oversized shared text. textLength=${sharedText.length}")
+            Toast.makeText(this, "공유 텍스트가 너무 깁니다. 약속이 포함된 부분만 다시 공유해 주세요.", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+
         pendingSharedText = sharedText
         pendingSourceApp = callingPackage
         pendingReceivedAt = System.currentTimeMillis()
@@ -102,5 +109,6 @@ class ShareReceiverActivity : Activity() {
     companion object {
         private const val TAG = "ShareReceiverActivity"
         private const val REQUEST_NOTIFICATIONS = 1001
+        private const val MAX_SHARED_TEXT_LENGTH = 5_000
     }
 }
