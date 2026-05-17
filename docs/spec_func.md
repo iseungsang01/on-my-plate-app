@@ -341,7 +341,7 @@
 
 - `showCandidate(candidate)`
   - Shows the pending detail setup notification when notification permission/channel state allows it.
-  - The notification title is the schedule detail setup label and it has a single inline `RemoteInput` action labeled with the Korean schedule-title input copy for entering the schedule title.
+  - The notification exposes two inline `RemoteInput` actions: `미정` with `일정 메모 작성`, and `확정` with `일정 제목 작성`.
   - When the notification cannot be shown, callers fall back to opening the in-app detail setup screen.
 
 - `showConflict(candidate, existing)`
@@ -354,8 +354,8 @@
 - `cancelCandidatePrompt(candidateId)`
   - 후보 입력 알림만 제거하고 충돌 알림은 유지할 때 사용합니다.
 
-- `saveAction(candidateId, status, label)`
-  - Builds the inline notification `RemoteInput` action that submits a title for the pending detail setup; the action label is the Korean schedule-title input copy and the input label is the Korean schedule-title copy.
+- `saveAction(candidateId, status, label, inputLabel)`
+  - Builds an inline notification `RemoteInput` action for the selected save mode; uncertain input is memo text, confirmed input is title text.
 
 
 - `conflictAction(candidateId, actionName, label)`
@@ -368,7 +368,7 @@
   - Builds the one-line candidate notification summary with an explicit start-time row label, unknown-time copy for missing start time, and optional location.
 
 - `candidateDetails(candidate)`
-  - Builds expanded candidate notification text with explicit start time, end time, and location rows, plus guidance that entering and confirming a title saves to the timetable.
+  - Builds expanded candidate notification text with explicit start time, end time, and location rows, plus guidance that uncertain saves use memo text and confirmed saves use title text.
 
 - `formatRange(startAt, endAt)`
   - 알림에 표시할 일정 구간 문자열을 만듭니다. 종료 시각이 없으면 기본 1시간을 적용합니다.
@@ -391,10 +391,10 @@
   - 처리 결과에 따라 후보 알림/충돌 알림을 정리합니다.
 
 - `handleSave(app, intent, candidateId)`
-  - `RemoteInput`에서 사용자가 입력한 제목을 읽습니다.
+  - `RemoteInput`에서 사용자가 입력한 텍스트를 읽고, `Uncertain`이면 memo override로, `Confirmed`이면 title override로 전달합니다.
   - intent의 상태 값을 `ScheduleStatus`로 변환합니다.
   - `PlannerRepository.saveFromCandidate`를 호출합니다.
-  - 제목 override가 없으면 후보의 자동 생성 제목으로 저장하고, 제목이 여전히 없으면 후보 알림을 다시 보여주며, 충돌이면 충돌 알림을 띄웁니다.
+  - 제목이 필요한 확정 저장에서 제목이 없으면 후보 알림을 다시 보여주며, 충돌이면 충돌 알림을 띄웁니다.
   - 충돌 알림을 유지해야 하는지 boolean으로 반환합니다.
 
 ---

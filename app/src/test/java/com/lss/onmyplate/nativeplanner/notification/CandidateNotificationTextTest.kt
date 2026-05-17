@@ -26,7 +26,7 @@ class CandidateNotificationTextTest {
         assertTrue(details.contains("\uC2DC\uC791 \uC2DC\uAC04 : 5/13 16:00"))
         assertTrue(details.contains("\uC885\uB8CC \uC2DC\uAC04 : 5/13 17:00"))
         assertTrue(details.contains("\uC7A5\uC18C : Gangnam"))
-        assertTrue(details.contains("\uC77C\uC815 \uC81C\uBAA9\uC744 \uC785\uB825\uD558\uACE0 \uD655\uC815\uD558\uBA74 \uC2DC\uAC04\uD45C\uC5D0 \uC800\uC7A5\uB429\uB2C8\uB2E4"))
+        assertTrue(details.contains("미정은 메모를, 확정은 제목을 작성해 시간표에 저장합니다"))
     }
 
     @Test
@@ -63,9 +63,11 @@ class CandidateNotificationTextTest {
 
 
     @Test
-    fun notificationTitleInputLabelsMatchCopy() {
-        assertEquals("일정 제목 입력", CANDIDATE_TITLE_INPUT_ACTION_LABEL)
-        assertEquals("일정 제목", CANDIDATE_REMOTE_INPUT_LABEL)
+    fun notificationInputLabelsMatchSaveModeCopy() {
+        assertEquals("미정", CANDIDATE_UNCERTAIN_ACTION_LABEL)
+        assertEquals("확정", CANDIDATE_CONFIRMED_ACTION_LABEL)
+        assertEquals("일정 메모 작성", CANDIDATE_MEMO_REMOTE_INPUT_LABEL)
+        assertEquals("일정 제목 작성", CANDIDATE_TITLE_REMOTE_INPUT_LABEL)
     }
 
     private fun candidate(startAt: Long?, endAt: Long?, location: String?): AppointmentCandidateEntity =

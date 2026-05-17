@@ -40,14 +40,17 @@ class NotificationActionReceiver : BroadcastReceiver() {
     }
 
     private suspend fun handleSave(app: OnMyPlateApp, intent: Intent, candidateId: String): Boolean {
-        // Native RemoteInput handling: this pulls the inline title typed directly inside the notification action.
-        val title = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REMOTE_TITLE)?.toString()
+        // Native RemoteInput handling: the same input key is used by the two notification actions.
+        // Confirmed treats the text as a title; uncertain treats it as a memo.
+        val input = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REMOTE_TITLE)?.toString()
         val status = when (intent.getStringExtra(EXTRA_STATUS)) {
             ScheduleStatus.Confirmed.dbValue -> ScheduleStatus.Confirmed
             ScheduleStatus.Planned.dbValue -> ScheduleStatus.Planned
             else -> ScheduleStatus.Uncertain
         }
-        return when (val result = app.repository.saveFromCandidate(candidateId, status, title)) {
+        val title = input.takeIf { status != ScheduleStatus.Uncertain }
+        val memo = input.takeIf { status == ScheduleStatus.Uncertain }
+        return when (val result = app.repository.saveFromCandidate(candidateId, status, title, memoOverride = memo)) {
             SaveResult.TitleRequired -> {
                 app.repository.getCandidate(candidateId)?.let { app.notifications.showCandidate(it) }
                 true
