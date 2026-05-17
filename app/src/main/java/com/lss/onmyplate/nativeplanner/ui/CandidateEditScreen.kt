@@ -121,8 +121,13 @@ fun CandidateEditScreen(
                 label = if (saveMode == CandidateSaveMode.Confirmed) "일정 제목 작성" else "일정 메모 작성",
                 accentColor = if (saveMode == CandidateSaveMode.Confirmed) WarmAccent else ColdAccent,
             )
-            DateTimePickerField(startAt, { startAt = it }, "시작 날짜/시간", required = false)
-            DateTimePickerField(endAt, { endAt = it }, "종료 날짜/시간", required = false)
+            DateAndTimeRangeFields(
+                startMillis = startAt,
+                onStartChange = { startAt = it },
+                endMillis = endAt,
+                onEndChange = { endAt = it },
+                requiredStart = false,
+            )
             BasketTextField(location, { location = it }, "장소")
             RecurrenceControls(recurrenceState, { recurrenceState = it })
         }

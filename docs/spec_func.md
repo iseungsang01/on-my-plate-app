@@ -504,7 +504,7 @@
 
 - `ScheduleEditScreen(repository, scheduleId, occurrenceStartAt, onBack)`
   - `observeSchedule(scheduleId)`로 저장 일정 1건을 관찰합니다.
-  - 제목, 시작/종료 시각, 장소, 메모, 상태, 반복 없음/매일/매주/매월/맞춤 반복, 반복 종료 시각을 편집합니다.
+  - 제목, 달력으로 고르는 시작 날짜, 숫자 키보드로 입력하는 시작/종료 시각, 장소, 메모, 상태, 반복 없음/매일/매주/매월/맞춤 반복, 반복 종료 시각을 편집합니다.
   - 반복 occurrence에서 열린 경우 `skipRecurringOccurrence`로 해당 occurrence만 건너뛸 수 있습니다.
   - 제목과 시작 시각이 유효할 때 `PlannerRepository.updateSchedule`로 저장하고 일정 화면으로 돌아갑니다.
 
@@ -538,7 +538,7 @@
 
 - `CandidateEditScreen(repository, candidateId, onDone, onConflict, onBack)`
   - Observes one pending `AppointmentCandidateEntity` as a schedule detail setup, not as a confirmed final schedule.
-  - Lets the user edit start/end time, location, recurrence, and either an uncertain memo or confirmed title before the candidate becomes a final schedule.
+  - Lets the user edit the calendar-selected start date, numeric-keyboard start/end time, location, recurrence, and either an uncertain memo or confirmed title before the candidate becomes a final schedule.
   - Shows `미정` and `확정` modes; blank-title candidates default to `미정`, while titled candidates default to `확정`.
   - `미정` shows `일정 메모 작성`, saves `ScheduleStatus.Uncertain`, and keeps memo separate from candidate title.
   - `확정` shows `일정 제목 작성`, requires a nonblank title, updates the candidate, and calls `saveFromCandidate(..., ScheduleStatus.Confirmed, ...)`.
@@ -587,6 +587,10 @@
 - `DateTimePickerField(value, onValueChange, label, required)`
   - 날짜/시간 값을 읽기 전용 필드로 표시하고 탭하면 Android `DatePickerDialog`와 `TimePickerDialog`를 순서대로 엽니다.
   - 선택한 날짜/시간을 epoch milliseconds로 변환해 상위 상태에 전달하며, 선택 값이 없는 선택 항목은 비울 수 있습니다.
+
+- `DateAndTimeRangeFields(startMillis, onStartChange, endMillis, onEndChange, requiredStart)`
+  - 일정/후보 편집에서 시작 날짜를 달력 필드로 분리하고, 시작 시간과 끝 시간은 `HHMM` 숫자 키보드 입력 필드로 받습니다.
+  - 유효한 시간 입력을 선택된 시작 날짜와 결합해 epoch milliseconds로 전달하며, 선택 항목에서는 시작/끝 시간을 함께 지울 수 있습니다.
 
 ### `ui/UiFormat.kt`
 

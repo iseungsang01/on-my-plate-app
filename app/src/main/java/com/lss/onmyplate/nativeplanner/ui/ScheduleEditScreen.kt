@@ -93,8 +93,12 @@ fun ScheduleEditScreen(
         Card(Modifier.fillMaxWidth(), colors = FeedLoopCardColors(), border = BorderStroke(1.dp, FeedLoopColors.Border), elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation)) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PlannerTextField(title, { title = it }, "제목")
-                DateTimePickerField(startAt, { startAt = it }, "시작 날짜/시간")
-                DateTimePickerField(endAt, { endAt = it }, "종료 날짜/시간", required = false)
+                DateAndTimeRangeFields(
+                    startMillis = startAt,
+                    onStartChange = { startAt = it },
+                    endMillis = endAt,
+                    onEndChange = { endAt = it },
+                )
                 PlannerTextField(location, { location = it }, "장소", required = false)
                 OutlinedTextField(
                     value = memo,

@@ -6,14 +6,49 @@ build/
 local.properties
 *.iml
 
+# Local environment files
 .env
 .env.*
 !.env.example
 secrets/
+
+# Android signing / release artifacts
 *.jks
 *.keystore
+*.apk
+*.aab
+*.apks
+*.idsig
+*.hprof
+captures/
+.externalNativeBuild/
+.cxx/
 
+# Google / Play / Firebase credentials
+google-services.json
+GoogleService-Info.plist
+service-account*.json
+play-service-account*.json
+credentials*.json
+client_secret*.json
+
+# Supabase local state / secrets
+.supabase/
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+supabase/.env.*
+
+# Local agent state
 .omx
 .omx/cache
 .omx/logs
 .omx/state
+
+# OS / editor / logs
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
