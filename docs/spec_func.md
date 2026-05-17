@@ -274,6 +274,7 @@
   - If no time can be parsed, start/end remain null instead of using the received/current time placeholder.
   - Stores blank `sourceApp` as null.
   - Stores candidate status as `pending`.
+  - Deduplicates identical `rawText`/`sourceApp` create requests that arrive within the rapid double-submit window by returning the already-created candidate.
   - Planner API save failures log the candidate payload shape and response snippet without logging the raw shared text body.
   - A 401 response clears the cached session token so stale local sessions from a reset/truncated backend require login again.
 - `createScheduleFromInput(rawText, sourceApp, receivedAt)`
@@ -293,6 +294,7 @@
   - Uncertain saves may use a safe internal title from the candidate title, first raw-text line, or `미정 일정`; this fallback title is not written back to the candidate title.
   - Confirmed title overrides update the candidate `extractedTitle` before final save.
   - `memoOverride` is stored on the final schedule memo when provided.
+  - Serializes candidate-to-schedule saves so rapid duplicate confirmation actions cannot create two final schedules for the same pending candidate.
   - 상태가 `Uncertain`이거나 시작 시간이 없으면 생성 시각을 fallback 시작 시각으로 사용해 저장하고 `SavedAsUncertain`을 반환합니다.
   - 충돌이 있고 `force=false`이면 `Conflict`를 반환합니다.
   - 충돌이 없거나 강제 저장이면 `insertSchedule` 후 반복 입력이 있으면 반복 규칙을 저장하고, 후보를 `confirmed`로 바꾸고 `Saved`를 반환합니다.
@@ -457,8 +459,8 @@
   - Shows the current Monday-to-Sunday schedule view as a full-screen timetable.
   - The top controls are compacted so the timetable body gets most of the available height.
 
-- `WeeklyTimetableWidget(days, schedulesByDay, onPreviousWeek, onNextWeek, onOpenSchedule)`
-  - Renders previous/date range/next controls on the first compact row and start/end/apply time controls on a second compact row.
+- `WeeklyTimetableWidget(days, schedulesByDay, onPreviousWeek, onNextWeek, onOpenSchedule, onMoveSchedule)`
+  - Renders previous/date range/settings/edit/next controls on one compact row; settings opens a time-range dialog and edit mode enables drag-moving schedule blocks.
   - Expands the timetable area vertically so the visible schedule grid is taller.
 
 - `WeeklyScheduleScreen(repository, onOpenSchedule)`
@@ -467,7 +469,7 @@
   - 시간표 일정 블록은 클릭 시 저장 일정 수정 route를 호출하며, 반복 occurrence는 원본 일정 ID와 occurrence 시작 시각을 함께 넘깁니다.
 
 - `WeeklyTimetableWidget(days, schedulesByDay, onPreviousWeek, onNextWeek, onOpenSchedule)`
-  - 월요일-일요일 7일 범위와 이전/다음 주 이동 버튼을 보여주고, 시작/끝 시간 숫자 입력과 적용 버튼으로 시간축 범위를 바꿀 수 있는 카드로 렌더링합니다.
+  - 월요일-일요일 7일 범위와 이전/다음 주 이동 버튼, 설정 버튼을 보여주고, 설정 대화상자에서 시작/끝 시간을 저장해 시간축 범위를 바꿀 수 있는 카드로 렌더링합니다.
 
 - `TimetableHeader(days)`
   - 시간표 상단의 7일 요일/날짜 header를 렌더링합니다.
@@ -494,6 +496,7 @@
 - `BasketScreen(repository, onOpenCandidate)`
   - Shows the promise basket screen and explains that shared/typed appointments become detail setups before confirmation.
   - Direct text input calls `createCandidate`, then opens the schedule detail setup screen for title/time/location confirmation.
+  - While direct text candidate creation is in flight, the input and create button are disabled and duplicate taps are ignored.
   - Shows pending candidates under the schedule detail setup section; selecting one opens `CandidateEditScreen`.
   - Shows final timetable records from `observeExpandedSchedules(rangeStart, rangeEnd)`.
 
@@ -540,6 +543,7 @@
   - `미정` shows `일정 메모 작성`, saves `ScheduleStatus.Uncertain`, and keeps memo separate from candidate title.
   - `확정` shows `일정 제목 작성`, requires a nonblank title, updates the candidate, and calls `saveFromCandidate(..., ScheduleStatus.Confirmed, ...)`.
   - Displays parse provenance as LLM parsing, fallback, or unknown.
+  - Save, discard, back, and cancel actions use an in-flight guard so rapid duplicate taps cannot submit the same candidate twice.
   - On successful save it returns to the weekly timetable; conflicts still route to the conflict screen.
 
 - `StatusSelector(status, onStatus)`
@@ -554,6 +558,7 @@
   - 시간을 바꿔서 추가, 겹치는 일정 조정, 보류 일정으로 추가, 추가하지 않음 옵션을 radio row로 제공합니다.
   - 시간 변경/일정 조정은 편집 화면으로 돌아가고, 보류는 `Uncertain` 상태로 저장하며, 추가하지 않음은 `discardCandidate`를 호출합니다.
   - 사용자가 강제로 추가하면 `saveFromCandidate(..., force = true)`로 저장합니다.
+  - Hold, discard, and force-add actions use an in-flight guard so rapid duplicate taps cannot submit the same candidate twice.
 
 ### `ui/AppointmentAddedScreen.kt`
 

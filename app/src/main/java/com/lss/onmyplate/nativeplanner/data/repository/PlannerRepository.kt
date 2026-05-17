@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -38,11 +40,21 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
+private data class RecentCandidateCreate(
+    val rawText: String,
+    val sourceApp: String?,
+    val savedAt: Long,
+    val candidate: AppointmentCandidateEntity,
+)
+
 class PlannerRepository(
     context: Context,
     private val parser: KoreanAppointmentParser,
 ) {
     private val appContext = context.applicationContext
+    private val createCandidateMutex = Mutex()
+    private val saveCandidateMutex = Mutex()
+    private var recentCandidateCreate: RecentCandidateCreate? = null
     private val sessionPrefs = appContext.getSharedPreferences(BuildConfig.PLANNER_SESSION_PREFS_NAME, Context.MODE_PRIVATE)
     private val client = PlannerApiClient(BuildConfig.PLANNER_API_BASE_URL) { clearCachedSession() }
     private val scheduleRecords = MutableStateFlow<List<ScheduleRecord>>(emptyList())
@@ -85,7 +97,15 @@ class PlannerRepository(
     suspend fun getExpandedSchedules(rangeStart: Long, rangeEnd: Long): List<ScheduleOccurrence> =
         expandScheduleOccurrences(refreshSchedules(rangeStart, rangeEnd), rangeStart, rangeEnd)
 
-    suspend fun createCandidate(rawText: String, sourceApp: String?, receivedAt: Long): AppointmentCandidateEntity {
+    suspend fun createCandidate(rawText: String, sourceApp: String?, receivedAt: Long): AppointmentCandidateEntity = createCandidateMutex.withLock {
+        val cleanRawText = rawText.trim()
+        val now = System.currentTimeMillis()
+        recentCandidateCreate
+            ?.takeIf { it.rawText == cleanRawText && it.sourceApp == sourceApp && now - it.savedAt <= DuplicateCreateWindowMillis }
+            ?.let { recent ->
+                Log.i(TAG, "createCandidate ignored duplicate rapid request. candidateId=${recent.candidate.id}, textLength=${cleanRawText.length}, sourceApp=$sourceApp")
+                return@withLock recent.candidate
+            }
         Log.i(TAG, "createCandidate started. textLength=${rawText.length}, sourceApp=$sourceApp, apiConfigured=${client.isConfigured()}, hasSession=${hasCachedSession()}")
         val parseOutcome = runCatching { parser.parseWithOutcome(rawText, receivedAt) }
             .getOrElse { error ->
@@ -116,7 +136,8 @@ class PlannerRepository(
         Log.i(TAG, "createCandidate API save succeeded. candidateId=${saved.id}, status=${saved.status}")
         rememberCandidate(saved)
         refreshPendingCandidates()
-        return saved
+        recentCandidateCreate = RecentCandidateCreate(cleanRawText, sourceApp, System.currentTimeMillis(), saved)
+        return@withLock saved
     }
 
     suspend fun createScheduleFromInput(rawText: String, sourceApp: String?, receivedAt: Long): ScheduleEntity {
@@ -170,10 +191,10 @@ class PlannerRepository(
         force: Boolean = false,
         recurrenceInput: RecurrenceInput = RecurrenceInput.None,
         memoOverride: String? = null,
-    ): SaveResult {
-        val candidate = getCandidate(candidateId) ?: return SaveResult.MissingCandidate
-        if (candidate.status != CandidateStatus.Pending.dbValue) return SaveResult.AlreadyHandled
-        val title = candidateScheduleTitle(candidate, selectedStatus, titleOverride) ?: return SaveResult.TitleRequired
+    ): SaveResult = saveCandidateMutex.withLock {
+        val candidate = getCandidate(candidateId) ?: return@withLock SaveResult.MissingCandidate
+        if (candidate.status != CandidateStatus.Pending.dbValue) return@withLock SaveResult.AlreadyHandled
+        val title = candidateScheduleTitle(candidate, selectedStatus, titleOverride) ?: return@withLock SaveResult.TitleRequired
         val shouldPersistTitle = selectedStatus != ScheduleStatus.Uncertain && candidate.extractedTitle != title
         val titledCandidate = if (shouldPersistTitle) {
             updateCandidate(candidate.id, title, candidate.extractedStartAt, candidate.extractedEndAt, candidate.extractedLocation)
@@ -187,7 +208,7 @@ class PlannerRepository(
         if (scheduleStatus != ScheduleStatus.Uncertain && startAt != null) {
             val endAt = ConflictDetector.newEnd(startAt, titledCandidate.extractedEndAt)
             val conflicts = getSchedules().filter { ConflictDetector.conflicts(startAt, endAt, it) }
-            if (conflicts.isNotEmpty() && !force) return SaveResult.Conflict(titledCandidate, conflicts)
+            if (conflicts.isNotEmpty() && !force) return@withLock SaveResult.Conflict(titledCandidate, conflicts)
         }
 
         val now = System.currentTimeMillis()
@@ -206,7 +227,7 @@ class PlannerRepository(
         rememberCandidate(titledCandidate.copy(status = CandidateStatus.Confirmed.dbValue))
         refreshPendingCandidates()
         refreshSchedules()
-        return if (scheduleStatus == ScheduleStatus.Uncertain) SaveResult.SavedAsUncertain(savedRecord.schedule) else SaveResult.Saved(savedRecord.schedule)
+        return@withLock if (scheduleStatus == ScheduleStatus.Uncertain) SaveResult.SavedAsUncertain(savedRecord.schedule) else SaveResult.Saved(savedRecord.schedule)
     }
 
     suspend fun updateCandidate(candidateId: String, title: String, startAt: Long?, endAt: Long?, location: String?) {
@@ -439,6 +460,7 @@ class PlannerRepository(
 
     companion object {
         private const val TAG = "PlannerRepository"
+        private const val DuplicateCreateWindowMillis = 2_000L
         private val scheduleZone: ZoneId = ZoneId.of("Asia/Seoul")
         private const val RecurrenceFrequencyDaily = "daily"
         private const val RecurrenceFrequencyWeekly = "weekly"

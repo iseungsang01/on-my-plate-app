@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -11,8 +12,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
@@ -21,12 +25,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.repository.ScheduleOccurrence
+import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
+import kotlin.math.roundToInt
 
 private val scheduleZone = ZoneId.of("Asia/Seoul")
 private val dayLabelFormatter = DateTimeFormatter.ofPattern("M/d")
@@ -37,6 +43,7 @@ private const val defaultScheduleDurationMinutes = 60
 
 @Composable
 fun WeeklyScheduleScreen(repository: PlannerRepository, onOpenSchedule: (String, Long?) -> Unit) {
+    val scope = rememberCoroutineScope()
     val today = remember { LocalDate.now(scheduleZone) }
     var weekOffset by remember { mutableStateOf(0) }
     val weekStart = remember(today, weekOffset) {
@@ -62,6 +69,23 @@ fun WeeklyScheduleScreen(repository: PlannerRepository, onOpenSchedule: (String,
                 onPreviousWeek = { weekOffset -= 1 },
                 onNextWeek = { weekOffset += 1 },
                 onOpenSchedule = onOpenSchedule,
+                onMoveSchedule = { occurrence, newStartAt ->
+                    scope.launch {
+                        val schedule = occurrence.schedule
+                        val duration = schedule.endAt?.minus(schedule.startAt)?.coerceAtLeast(30 * 60_000L)
+                        runCatching {
+                            repository.updateSchedule(
+                                scheduleId = occurrence.scheduleId,
+                                title = schedule.title,
+                                startAt = newStartAt,
+                                endAt = duration?.let { newStartAt + it },
+                                location = schedule.location,
+                                memo = schedule.memo,
+                                status = scheduleStatusFromDb(schedule.status),
+                            )
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -75,19 +99,14 @@ private fun WeeklyTimetableWidget(
     onPreviousWeek: () -> Unit,
     onNextWeek: () -> Unit,
     onOpenSchedule: (String, Long?) -> Unit,
+    onMoveSchedule: (ScheduleOccurrence, Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var visibleStartHour by remember { mutableStateOf(8) }
     var visibleEndHour by remember { mutableStateOf(24) }
-    var startHourInput by remember { mutableStateOf("8") }
-    var endHourInput by remember { mutableStateOf("24") }
-    val parsedStartHour = startHourInput.toIntOrNull()
-    val parsedEndHour = endHourInput.toIntOrNull()
-    val canApplyTimeRange = parsedStartHour != null &&
-        parsedEndHour != null &&
-        parsedStartHour in 0..23 &&
-        parsedEndHour in 1..24 &&
-        parsedStartHour < parsedEndHour
+    var showTimeRangeSettings by remember { mutableStateOf(false) }
+    var editMode by remember { mutableStateOf(false) }
+    var showSnapGrid by remember { mutableStateOf(false) }
 
     Card(
         modifier,
@@ -113,50 +132,23 @@ private fun WeeklyTimetableWidget(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                IconButton(onClick = { showTimeRangeSettings = true }, modifier = Modifier.size(32.dp)) {
+                    Text("⚙", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                }
+                IconButton(
+                    onClick = {
+                        editMode = !editMode
+                        if (!editMode) showSnapGrid = false
+                    },
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(if (editMode) FeedLoopColors.PrimaryLight else Color.Transparent),
+                ) {
+                    Text("✎", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = if (editMode) FeedLoopColors.PrimaryDark else FeedLoopColors.TextPrimary)
+                }
                 IconButton(onClick = onNextWeek, modifier = Modifier.size(32.dp)) {
                     Text(">", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = startHourInput,
-                    onValueChange = { if (it.length <= 2 && it.all(Char::isDigit)) startHourInput = it },
-                    placeholder = { Text("시작") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.labelSmall,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                )
-                Text("~", color = FeedLoopColors.Secondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
-                OutlinedTextField(
-                    value = endHourInput,
-                    onValueChange = { if (it.length <= 2 && it.all(Char::isDigit)) endHourInput = it },
-                    placeholder = { Text("끝") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.labelSmall,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                )
-                Button(
-                    onClick = {
-                        val start = parsedStartHour ?: return@Button
-                        val end = parsedEndHour ?: return@Button
-                        if (start in 0..23 && end in 1..24 && start < end) {
-                            visibleStartHour = start
-                            visibleEndHour = end
-                            startHourInput = start.toString()
-                            endHourInput = end.toString()
-                        }
-                    },
-                    enabled = canApplyTimeRange,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.heightIn(min = 32.dp),
-                ) {
-                    Text("적용", style = MaterialTheme.typography.labelSmall, maxLines = 1)
                 }
             }
             TimetableHeader(days = days)
@@ -165,11 +157,101 @@ private fun WeeklyTimetableWidget(
                 schedulesByDay = schedulesByDay,
                 startHour = visibleStartHour,
                 endHour = visibleEndHour,
+                editMode = editMode,
+                showSnapGrid = showSnapGrid,
                 onOpenSchedule = onOpenSchedule,
+                onMoveSchedule = onMoveSchedule,
+                onDragStateChange = { showSnapGrid = it },
                 modifier = Modifier.weight(1f),
             )
+            if (editMode) {
+                Text("✎ 편집 모드: 일정을 길게 눌러 30분 격자에 맞춰 드래그하세요.", color = FeedLoopColors.PrimaryDark, style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
+
+    if (showTimeRangeSettings) {
+        TimeRangeSettingsDialog(
+            initialStartHour = visibleStartHour,
+            initialEndHour = visibleEndHour,
+            onDismiss = { showTimeRangeSettings = false },
+            onSave = { start, end ->
+                visibleStartHour = start
+                visibleEndHour = end
+                showTimeRangeSettings = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun TimeRangeSettingsDialog(
+    initialStartHour: Int,
+    initialEndHour: Int,
+    onDismiss: () -> Unit,
+    onSave: (Int, Int) -> Unit,
+) {
+    var startHourInput by remember(initialStartHour) { mutableStateOf(initialStartHour.toString()) }
+    var endHourInput by remember(initialEndHour) { mutableStateOf(initialEndHour.toString()) }
+    val parsedStartHour = startHourInput.toIntOrNull()
+    val parsedEndHour = endHourInput.toIntOrNull()
+    val canSave = parsedStartHour != null &&
+        parsedEndHour != null &&
+        parsedStartHour in 0..23 &&
+        parsedEndHour in 1..24 &&
+        parsedStartHour < parsedEndHour
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("시간표 설정") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("시간표에 표시할 시간 범위를 바꿉니다.", color = FeedLoopColors.Secondary, style = MaterialTheme.typography.bodySmall)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = startHourInput,
+                        onValueChange = { if (it.length <= 2 && it.all(Char::isDigit)) startHourInput = it },
+                        label = { Text("시작") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    Text("~", color = FeedLoopColors.Secondary, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = endHourInput,
+                        onValueChange = { if (it.length <= 2 && it.all(Char::isDigit)) endHourInput = it },
+                        label = { Text("끝") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                }
+                if (!canSave) {
+                    Text("시작은 0~23, 끝은 1~24 사이에서 시작보다 크게 입력해 주세요.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val start = parsedStartHour ?: return@TextButton
+                    val end = parsedEndHour ?: return@TextButton
+                    if (start in 0..23 && end in 1..24 && start < end) onSave(start, end)
+                },
+                enabled = canSave,
+            ) {
+                Text("저장")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("취소")
+            }
+        },
+    )
 }
 
 @Composable
@@ -199,7 +281,11 @@ private fun TimetableBody(
     schedulesByDay: Map<LocalDate, List<ScheduleOccurrence>>,
     startHour: Int,
     endHour: Int,
+    editMode: Boolean,
+    showSnapGrid: Boolean,
     onOpenSchedule: (String, Long?) -> Unit,
+    onMoveSchedule: (ScheduleOccurrence, Long) -> Unit,
+    onDragStateChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val railWidth = timetableRailWidth
@@ -243,6 +329,20 @@ private fun TimetableBody(
                     )
                 }
 
+                if (editMode && showSnapGrid) {
+                    val snapMarks = ((startMinute + 29) / 30..endMinute / 30).map { it * 30 }
+                    snapMarks.forEach { minute ->
+                        val y = bodyHeight * ((minute - startMinute).toFloat() / (endMinute - startMinute).toFloat())
+                        Box(
+                            Modifier
+                                .offset(x = railWidth, y = y)
+                                .width(bodyWidth - railWidth)
+                                .height(1.dp)
+                                .background(if (minute % 60 == 0) FeedLoopColors.Primary.copy(alpha = 0.45f) else FeedLoopColors.Primary.copy(alpha = 0.22f))
+                        )
+                    }
+                }
+
                 (0..7).forEach { index ->
                     Box(
                         Modifier
@@ -269,7 +369,11 @@ private fun TimetableBody(
                             bodyHeight = bodyHeight,
                             visibleRangeStartMinute = startMinute,
                             visibleRangeEndMinute = endMinute,
+                            days = days,
+                            editMode = editMode,
                             onOpenSchedule = onOpenSchedule,
+                            onMoveSchedule = onMoveSchedule,
+                            onDragStateChange = onDragStateChange,
                         )
                     }
                 }
@@ -287,7 +391,11 @@ private fun TimetableEventBlock(
     bodyHeight: Dp,
     visibleRangeStartMinute: Int,
     visibleRangeEndMinute: Int,
+    days: List<LocalDate>,
+    editMode: Boolean,
     onOpenSchedule: (String, Long?) -> Unit,
+    onMoveSchedule: (ScheduleOccurrence, Long) -> Unit,
+    onDragStateChange: (Boolean) -> Unit,
 ) {
     val visibleStartMinute = event.startMinute
     val visibleEndMinute = event.endMinute
@@ -301,16 +409,58 @@ private fun TimetableEventBlock(
     val width = (laneWidth - 4.dp).coerceAtLeast(12.dp)
     val showTime = height >= 30.dp && width >= 26.dp
     val showLocation = height >= 46.dp && width >= 34.dp && !event.occurrence.schedule.location.isNullOrBlank()
+    val density = LocalDensity.current
+    val dayWidthPx = with(density) { dayWidth.toPx() }.coerceAtLeast(1f)
+    val bodyHeightPx = with(density) { bodyHeight.toPx() }.coerceAtLeast(1f)
+    val visibleDragMinutes = (visibleRangeEndMinute - visibleRangeStartMinute).coerceAtLeast(1)
+    var dragOffset by remember(event.occurrence.scheduleId, event.occurrence.occurrenceStartAt) { mutableStateOf(Offset.Zero) }
+    val dragModifier = if (editMode) {
+        Modifier.pointerInput(event.occurrence.scheduleId, event.occurrence.occurrenceStartAt, dayIndex, dayWidthPx, bodyHeightPx, visibleRangeStartMinute, visibleRangeEndMinute) {
+            detectDragGesturesAfterLongPress(
+                onDragStart = {
+                    dragOffset = Offset.Zero
+                    onDragStateChange(true)
+                },
+                onDragCancel = {
+                    dragOffset = Offset.Zero
+                    onDragStateChange(false)
+                },
+                onDragEnd = {
+                    val newDayIndex = (dayIndex + (dragOffset.x / dayWidthPx).roundToInt()).coerceIn(days.indices)
+                    val durationMinutes = event.durationMinutes.coerceAtLeast(30)
+                    val rawStartMinute = event.startMinute + ((dragOffset.y / bodyHeightPx) * visibleDragMinutes).roundToInt()
+                    val snappedStartMinute = snapToThirtyMinutes(rawStartMinute)
+                        .coerceIn(visibleRangeStartMinute, (visibleRangeEndMinute - durationMinutes).coerceAtLeast(visibleRangeStartMinute))
+                    val newStartAt = days[newDayIndex]
+                        .atStartOfDay(scheduleZone)
+                        .plusMinutes(snappedStartMinute.toLong())
+                        .toInstant()
+                        .toEpochMilli()
+                    dragOffset = Offset.Zero
+                    onDragStateChange(false)
+                    if (newStartAt != event.occurrence.schedule.startAt) {
+                        onMoveSchedule(event.occurrence, newStartAt)
+                    }
+                },
+                onDrag = { change, dragAmount ->
+                    change.consume()
+                    dragOffset += dragAmount
+                },
+            )
+        }
+    } else {
+        Modifier.clickable { onOpenSchedule(event.occurrence.scheduleId, event.occurrence.occurrenceStartAt.takeIf { event.occurrence.isRecurring }) }
+    }
 
     Column(
         Modifier
-            .offset(x = left, y = top)
+            .offset(x = left + with(density) { dragOffset.x.toDp() }, y = top + with(density) { dragOffset.y.toDp() })
             .width(width)
             .height(height)
             .clip(MaterialTheme.shapes.small)
-            .background(FeedLoopColors.PrimaryLight)
-            .border(1.dp, FeedLoopColors.Primary, MaterialTheme.shapes.small)
-            .clickable { onOpenSchedule(event.occurrence.scheduleId, event.occurrence.occurrenceStartAt.takeIf { event.occurrence.isRecurring }) }
+            .background(if (editMode) FeedLoopColors.PrimaryLight.copy(alpha = 0.88f) else FeedLoopColors.PrimaryLight)
+            .border(if (editMode) 2.dp else 1.dp, FeedLoopColors.Primary, MaterialTheme.shapes.small)
+            .then(dragModifier)
             .padding(horizontal = 4.dp, vertical = 3.dp),
         verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
@@ -351,7 +501,9 @@ private data class TimetableEvent(
     val endMinute: Int,
     val lane: Int,
     val laneCount: Int,
-)
+) {
+    val durationMinutes: Int = (endMinute - startMinute).coerceAtLeast(30)
+}
 
 private fun buildTimetableEvents(day: LocalDate, schedules: List<ScheduleOccurrence>): List<TimetableEvent> {
     val laneEnds = mutableListOf<Int>()
@@ -409,6 +561,8 @@ private fun formatCompactMinute(minute: Int): String {
     val minutePart = bounded % 60
     return if (minutePart == 0) hour else "$hour:${minutePart.toString().padStart(2, '0')}"
 }
+
+private fun snapToThirtyMinutes(minute: Int): Int = (minute / 30f).roundToInt() * 30
 
 private fun labelOffset(y: Dp, bodyHeight: Dp): Dp = when {
     y <= 8.dp -> 2.dp

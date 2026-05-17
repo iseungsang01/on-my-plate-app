@@ -32,6 +32,8 @@ fun ConflictScreen(
     val candidate by repository.observeCandidate(candidateId).collectAsState(initial = null)
     val hasTitle = candidate?.extractedTitle?.isNotBlank() == true
     var selectedOption by remember { mutableStateOf("time") }
+    var actionInFlight by remember { mutableStateOf(false) }
+    var actionError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(candidateId) {
         conflicts = when (val attempt = repository.conflictsForCandidate(candidateId)) {
@@ -49,7 +51,7 @@ fun ConflictScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onEdit) { Text("← 편집") }
+            TextButton(onClick = onEdit, enabled = !actionInFlight) { Text("← 편집") }
             Text("일정 충돌", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(64.dp))
         }
@@ -78,41 +80,75 @@ fun ConflictScreen(
         ConflictOption("discard", "추가하지 않음", selectedOption) { selectedOption = it }
 
         Spacer(Modifier.weight(1f, fill = false))
+        actionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Button(
             onClick = {
                 when (selectedOption) {
                     "time", "adjust" -> onEdit()
-                    "hold" -> scope.launch {
-                        when (val result = repository.saveFromCandidate(candidateId, ScheduleStatus.Uncertain, candidate?.extractedTitle)) {
-                            is SaveResult.Saved -> Unit
-                            is SaveResult.SavedAsUncertain -> Unit
-                            else -> Unit
+                    "hold" -> {
+                        if (actionInFlight) return@Button
+                        actionInFlight = true
+                        actionError = null
+                        scope.launch {
+                            runCatching {
+                                repository.saveFromCandidate(candidateId, ScheduleStatus.Uncertain, candidate?.extractedTitle)
+                            }.onSuccess { result ->
+                                when (result) {
+                                    is SaveResult.Saved -> Unit
+                                    is SaveResult.SavedAsUncertain -> Unit
+                                    else -> Unit
+                                }
+                                onDone()
+                            }.onFailure {
+                                actionError = "Unable to save. Check the network and try again."
+                                actionInFlight = false
+                            }
                         }
-                        onDone()
                     }
-                    else -> scope.launch {
-                        repository.discardCandidate(candidateId)
-                        onDone()
+                    else -> {
+                        if (actionInFlight) return@Button
+                        actionInFlight = true
+                        actionError = null
+                        scope.launch {
+                            runCatching {
+                                repository.discardCandidate(candidateId)
+                            }.onSuccess {
+                                onDone()
+                            }.onFailure {
+                                actionError = "Unable to save. Check the network and try again."
+                                actionInFlight = false
+                            }
+                        }
                     }
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = hasTitle,
+            enabled = hasTitle && !actionInFlight,
             colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
         ) { Text(if (selectedOption == "time" || selectedOption == "adjust") "시간 변경하고 추가" else "선택 완료") }
 
         OutlinedButton(
             onClick = {
+                if (actionInFlight) return@OutlinedButton
+                actionInFlight = true
+                actionError = null
                 scope.launch {
-                    when (val result = repository.saveFromCandidate(candidateId, ScheduleStatus.Confirmed, candidate?.extractedTitle, force = true)) {
-                        is SaveResult.Saved -> Unit
-                        is SaveResult.SavedAsUncertain -> Unit
-                        else -> Unit
+                    runCatching {
+                        repository.saveFromCandidate(candidateId, ScheduleStatus.Confirmed, candidate?.extractedTitle, force = true)
+                    }.onSuccess { result ->
+                        when (result) {
+                            is SaveResult.Saved -> Unit
+                            is SaveResult.SavedAsUncertain -> Unit
+                            else -> Unit
+                        }
+                        onDone()
+                    }.onFailure {
+                        actionError = "Unable to save. Check the network and try again."
+                        actionInFlight = false
                     }
-                    onDone()
                 }
             },
-            enabled = hasTitle,
+            enabled = hasTitle && !actionInFlight,
             modifier = Modifier.fillMaxWidth(),
             border = BorderStroke(1.dp, FeedLoopColors.WarningBorder),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = FeedLoopColors.Warning),

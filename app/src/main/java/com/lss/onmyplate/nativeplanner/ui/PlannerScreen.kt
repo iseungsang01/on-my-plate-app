@@ -112,10 +112,11 @@ fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Uni
                     )
                     Button(
                         onClick = {
+                            if (isCreatingCandidate) return@Button
                             val rawText = directInput.trim()
                             if (rawText.isBlank()) return@Button
+                            isCreatingCandidate = true
                             scope.launch {
-                                isCreatingCandidate = true
                                 saveScheduleError = null
                                 saveScheduleMessage = null
                                 try {

@@ -63,8 +63,10 @@ fun CandidateEditScreen(
     var endAt by remember(candidate?.id) { mutableStateOf(candidate?.extractedEndAt) }
     var location by remember(candidate?.id) { mutableStateOf(candidate?.extractedLocation.orEmpty()) }
     var recurrenceState by remember(candidate?.id) { mutableStateOf(RecurrenceUiState()) }
+    var actionInFlight by remember(candidate?.id) { mutableStateOf(false) }
+    var actionError by remember(candidate?.id) { mutableStateOf<String?>(null) }
     val recurrenceInput = recurrenceState.toRecurrenceInput()
-    val canSave = recurrenceInput != null && (saveMode == CandidateSaveMode.Uncertain || title.isNotBlank())
+    val canSave = !actionInFlight && recurrenceInput != null && (saveMode == CandidateSaveMode.Uncertain || title.isNotBlank())
 
     val currentCandidate = candidate
     if (currentCandidate == null) {
@@ -81,14 +83,23 @@ fun CandidateEditScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = onBack) { Text("← 설정 목록") }
+            TextButton(onClick = onBack, enabled = !actionInFlight) { Text("← 설정 목록") }
             Text("일정 디테일 설정", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             TextButton(onClick = {
+                if (actionInFlight) return@TextButton
+                actionInFlight = true
+                actionError = null
                 scope.launch {
-                    repository.discardCandidate(candidateId)
-                    onBack()
+                    runCatching {
+                        repository.discardCandidate(candidateId)
+                    }.onSuccess {
+                        onBack()
+                    }.onFailure {
+                        actionError = "Unable to save. Check the network and try again."
+                        actionInFlight = false
+                    }
                 }
-            }) { Text("버리기") }
+            }, enabled = !actionInFlight) { Text("버리기") }
         }
 
         AssistChip(
@@ -125,35 +136,45 @@ fun CandidateEditScreen(
         Text("신뢰도", style = MaterialTheme.typography.labelLarge, color = FeedLoopColors.Secondary)
         LinearProgressIndicator(progress = { currentCandidate.confidence.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth(), color = FeedLoopColors.Success, trackColor = FeedLoopColors.BorderMuted)
         Text("${(currentCandidate.confidence * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = FeedLoopColors.Secondary)
+        actionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f), border = BorderStroke(1.dp, FeedLoopColors.Border)) { Text("취소") }
+            OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f), border = BorderStroke(1.dp, FeedLoopColors.Border), enabled = !actionInFlight) { Text("취소") }
             Button(
                 onClick = {
+                    if (actionInFlight) return@Button
+                    actionInFlight = true
+                    actionError = null
                     scope.launch {
-                        val candidateTitle = if (saveMode == CandidateSaveMode.Confirmed) title else currentCandidate.extractedTitle
-                        repository.updateCandidate(candidateId, candidateTitle, startAt, endAt, location)
-                        val result = if (saveMode == CandidateSaveMode.Confirmed) {
-                            repository.saveFromCandidate(
-                                candidateId = candidateId,
-                                selectedStatus = ScheduleStatus.Confirmed,
-                                titleOverride = title,
-                                recurrenceInput = recurrenceInput ?: return@launch,
-                            )
-                        } else {
-                            repository.saveFromCandidate(
-                                candidateId = candidateId,
-                                selectedStatus = ScheduleStatus.Uncertain,
-                                titleOverride = null,
-                                recurrenceInput = recurrenceInput ?: return@launch,
-                                memoOverride = memo,
-                            )
-                        }
-                        when (result) {
-                            is SaveResult.Conflict -> onConflict()
-                            is SaveResult.Saved -> onDone()
-                            is SaveResult.SavedAsUncertain -> onDone()
-                            else -> onDone()
+                        runCatching {
+                            val candidateTitle = if (saveMode == CandidateSaveMode.Confirmed) title else currentCandidate.extractedTitle
+                            repository.updateCandidate(candidateId, candidateTitle, startAt, endAt, location)
+                            if (saveMode == CandidateSaveMode.Confirmed) {
+                                repository.saveFromCandidate(
+                                    candidateId = candidateId,
+                                    selectedStatus = ScheduleStatus.Confirmed,
+                                    titleOverride = title,
+                                    recurrenceInput = recurrenceInput ?: return@launch,
+                                )
+                            } else {
+                                repository.saveFromCandidate(
+                                    candidateId = candidateId,
+                                    selectedStatus = ScheduleStatus.Uncertain,
+                                    titleOverride = null,
+                                    recurrenceInput = recurrenceInput ?: return@launch,
+                                    memoOverride = memo,
+                                )
+                            }
+                        }.onSuccess { result ->
+                            when (result) {
+                                is SaveResult.Conflict -> onConflict()
+                                is SaveResult.Saved -> onDone()
+                                is SaveResult.SavedAsUncertain -> onDone()
+                                else -> onDone()
+                            }
+                        }.onFailure {
+                            actionError = "Unable to save. Check the network and try again."
+                            actionInFlight = false
                         }
                     }
                 },
