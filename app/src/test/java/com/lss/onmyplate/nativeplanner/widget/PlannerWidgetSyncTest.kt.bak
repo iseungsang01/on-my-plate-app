@@ -4,11 +4,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
 import com.lss.onmyplate.nativeplanner.data.repository.ScheduleOccurrence
 import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
-import java.time.DayOfWeek
-import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
-import java.time.temporal.TemporalAdjusters
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,9 +29,8 @@ class PlannerWidgetSyncTest {
 
     @Test
     fun saveSnapshotStoresNativeManualEventsGroupedByDate() {
-        val testDate = currentWidgetWeekStart().plusDays(3)
-        val firstStart = epochMillis(testDate, 9, 15)
-        val secondStart = epochMillis(testDate, 11, 0)
+        val firstStart = epochMillis(2026, 5, 7, 9, 15)
+        val secondStart = epochMillis(2026, 5, 7, 11, 0)
 
         PlannerWidgetSync.saveSnapshot(
             context,
@@ -58,27 +54,22 @@ class PlannerWidgetSyncTest {
         assertEquals(24 * 60, snapshot.getInt("viewportEndMinute"))
         assertFalse(snapshot.has("autoPlans"))
 
-        val manualEventsByDate = snapshot.getJSONObject("manualEventsByDate")
-        val dateKeys = manualEventsByDate.keys().asSequence().toList()
-        assertEquals(
-            "Expected exactly one manualEventsByDate bucket but keys were $dateKeys in snapshot=$snapshot",
-            1,
-            dateKeys.size,
-        )
-        val items = manualEventsByDate.getJSONArray(dateKeys.single())
+        val dateKey = java.time.Instant.ofEpochMilli(firstStart).atZone(zoneId).toLocalDate().toString()
+        val items = snapshot
+            .getJSONObject("manualEventsByDate")
+            .getJSONArray(dateKey)
         assertEquals(2, items.length())
         assertEquals("Earlier", items.getJSONObject(0).getString("title"))
         assertEquals(9 * 60 + 15, items.getJSONObject(0).getInt("startMinute"))
         assertEquals(10 * 60 + 15, items.getJSONObject(0).getInt("endMinute"))
-        assertEquals("manual", items.getJSONObject(0).optString("source", "manual"))
-        assertFalse(items.getJSONObject(0).optBoolean("isRecurring", false))
+        assertEquals("manual", items.getJSONObject(0).getString("source"))
+        assertFalse(items.getJSONObject(0).getBoolean("isRecurring"))
         assertEquals("Later", items.getJSONObject(1).getString("title"))
     }
 
     @Test
     fun saveSnapshotUsesDefaultOneHourEndWithMinimumThirtyMinutesAfterMidnightRollover() {
-        val testDate = currentWidgetWeekStart().plusDays(6)
-        val startAt = epochMillis(testDate, 23, 45)
+        val startAt = epochMillis(2026, 5, 8, 23, 45)
 
         PlannerWidgetSync.saveSnapshot(
             context,
@@ -92,7 +83,7 @@ class PlannerWidgetSyncTest {
                     .getString(PlannerWidgetStore.KEY_SUMMARY_SNAPSHOT, null),
             ),
         ).getJSONObject("manualEventsByDate")
-            .getJSONArray(testDate.toString())
+            .getJSONArray("2026-05-08")
             .getJSONObject(0)
 
         assertEquals(23 * 60 + 45, event.getInt("startMinute"))
@@ -124,10 +115,4 @@ class PlannerWidgetSyncTest {
 
     private fun epochMillis(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =
         LocalDateTime.of(year, month, day, hour, minute).atZone(zoneId).toInstant().toEpochMilli()
-
-    private fun epochMillis(date: LocalDate, hour: Int, minute: Int): Long =
-        date.atTime(hour, minute).atZone(zoneId).toInstant().toEpochMilli()
-
-    private fun currentWidgetWeekStart(): LocalDate =
-        LocalDate.now(zoneId).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
 }
