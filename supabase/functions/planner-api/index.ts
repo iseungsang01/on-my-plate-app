@@ -1,8 +1,9 @@
 /// <reference lib="deno.ns" />
 
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { db, hasSupabaseConfig } from "./db.ts";
 import { parseAppointment } from "./parser.ts";
 import { apiError, corsHeaders, errorResponse, jsonResponse, readJson, toApiError } from "./http.ts";
+import { optionalUserId, requireUserId } from "./auth.ts";
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 type JsonObject = { [key: string]: JsonValue };
@@ -40,8 +41,6 @@ type RecurrenceExceptionInput = {
   action: "skip";
 };
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const FUNCTION_NAME = "planner-api";
 const PASSWORD_HASH_PREFIX = "pbkdf2-sha256$v1$";
 const LEGACY_SHA256_HASH_PREFIX = "sha256$v1$";
@@ -51,15 +50,11 @@ const SESSION_TOKEN_PREFIX = "omp_session_v1_";
 const SESSION_TTL_DAYS = Number(Deno.env.get("PLANNER_SESSION_TTL_DAYS") ?? "30");
 const SESSION_TTL_MS = Math.max(1, SESSION_TTL_DAYS) * 24 * 60 * 60 * 1000;
 
-const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
-
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    if (!hasSupabaseConfig()) {
       return errorResponse(500, "Supabase Edge Function 환경 변수가 설정되지 않았습니다.");
     }
 
@@ -724,49 +719,6 @@ async function requireGroupMember(userId: string, groupId: string): Promise<void
   if (!data) throw apiError(403, "공유 그룹 권한이 없습니다.");
 }
 
-async function requireUserId(request: Request): Promise<string> {
-  const userId = await userIdFromSession(request, true);
-  if (!userId) throw apiError(401, "로그인이 필요합니다.");
-  return userId;
-}
-
-async function optionalUserId(request: Request): Promise<string | null> {
-  return await userIdFromSession(request, false);
-}
-
-async function userIdFromSession(request: Request, required: boolean): Promise<string | null> {
-  const header = request.headers.get("authorization") ?? "";
-  if (!header.trim()) {
-    if (required) throw apiError(401, "로그인이 필요합니다.");
-    return null;
-  }
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match) throw apiError(401, "로그인이 필요합니다.");
-
-  const token = match[1].trim();
-  if (!token.startsWith(SESSION_TOKEN_PREFIX)) {
-    throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
-  }
-
-  const tokenHash = await hashSessionToken(token);
-  const { data: session, error } = await db
-    .from("planner_sessions")
-    .select("user_id,expires_at,revoked_at")
-    .eq("token_hash", tokenHash)
-    .maybeSingle();
-
-  if (error) throw apiError(500, error.message);
-  if (!session || session.revoked_at) {
-    throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
-  }
-
-  const expiresAt = Date.parse(String(session.expires_at));
-  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-    throw apiError(401, "로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
-  }
-
-  return String(session.user_id);
-}
 
 async function readSchedulePayload(request: Request): Promise<SchedulePayload> {
   const body = await readJson(request);

@@ -13,7 +13,7 @@ This Edge Function is being modularized incrementally.
   - candidate routes
   - sharing routes
   - feedback route
-  - shared DB helpers still awaiting extraction
+  - domain DB helper functions still awaiting extraction
 
 - `parser.ts`
   - `/api/parser/appointment`
@@ -21,6 +21,10 @@ This Edge Function is being modularized incrementally.
   - parser prompt
   - parser response normalization
   - parser-local JSON/error helpers
+
+- `auth.ts`
+  - session token validation extracted in P1-5d-1
+  - signup/login/change-password/password hashing still awaiting extraction
 
 ## Target module map
 
@@ -34,14 +38,14 @@ Future phases should extract modules in this order:
    - `toApiError`
    - `readJson`
 
-2. `db.ts`
+2. `db.ts` ✅ extracted in P1-5c
    - Supabase client construction
    - env validation
 
-3. `auth.ts`
-   - signup/login/change-password
-   - session validation
-   - password hashing
+3. `auth.ts` ⏳ partially extracted in P1-5d-1
+   - session validation ✅ extracted
+   - signup/login/change-password still in `index.ts`
+   - password hashing still in `index.ts`
 
 4. `recurrence.ts`
    - recurrence payload parsing
