@@ -52,7 +52,10 @@ fun WeeklyScheduleScreen(repository: PlannerRepository, onOpenSchedule: (String,
     val days = remember(weekStart) { (0L..6L).map { weekStart.plusDays(it) } }
     val rangeStart = remember(days) { days.first().atStartOfDay(scheduleZone).toInstant().toEpochMilli() }
     val rangeEnd = remember(days) { days.last().plusDays(1).atStartOfDay(scheduleZone).toInstant().toEpochMilli() }
-    val schedules by repository.observeExpandedSchedules(rangeStart, rangeEnd).collectAsState(initial = emptyList())
+    val expandedSchedulesFlow = remember(repository, rangeStart, rangeEnd) {
+        repository.observeExpandedSchedules(rangeStart, rangeEnd)
+    }
+    val schedules by expandedSchedulesFlow.collectAsState(initial = emptyList())
     val runtimeState by repository.runtimeState.collectAsState()
     val schedulesByDay = remember(schedules, days) {
         days.associateWith { day -> schedules.filter { it.localDate() == day } }

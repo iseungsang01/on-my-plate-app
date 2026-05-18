@@ -237,9 +237,14 @@ class PlannerRepository(
         }
         withContext(Dispatchers.IO) { client.updateCandidateStatus(sessionToken(), candidateId, CandidateStatus.Confirmed.dbValue) }
         rememberCandidate(titledCandidate.copy(status = CandidateStatus.Confirmed.dbValue))
-        refreshPendingCandidates()
-        refreshSchedules()
-        refreshCurrentWeekWidgetSnapshotFromCache()
+        try {
+            refreshPendingCandidates()
+            refreshSchedules()
+            refreshCurrentWeekWidgetSnapshotFromCache()
+        } catch (error: Throwable) {
+            Log.w(TAG, "saveFromCandidate succeeded but post-save refresh failed. candidateId=$candidateId", error)
+            clearRuntimeError()
+        }
         return@withLock if (scheduleStatus == ScheduleStatus.Uncertain) SaveResult.SavedAsUncertain(savedRecord.schedule) else SaveResult.Saved(savedRecord.schedule)
     }
 
