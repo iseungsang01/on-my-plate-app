@@ -8,7 +8,6 @@ This Edge Function is being modularized incrementally.
   - request routing
   - CORS preflight
   - global error boundary
-  - auth routes
   - personal schedule routes
   - candidate routes
   - sharing routes
@@ -42,29 +41,7 @@ Future phases should extract modules in this order:
    - Supabase client construction
    - env validation
 
-3. `auth.ts` ⏳ partially extracted in P1-5d-1
-   - session validation ✅ extracted
-   - signup/login/change-password still in `index.ts`
-   - password hashing still in `index.ts`
-
-4. `recurrence.ts`
-   - recurrence payload parsing
-   - recurrence persistence
-   - recurrence response mapping
-
-5. `schedules.ts`
-   - personal schedule CRUD
-   - shared schedule upload/list
-
-6. `candidates.ts`
-   - candidate CRUD
-
-7. `sharing.ts`
-   - profile/group/member routes
-
-8. `feedback.ts`
-   - feedback submission
-
-## Rule
-
-Do not extract multiple high-risk modules in one patch unless there are route-level smoke tests covering the affected paths.
+3. `auth.ts` ✅ route/session extracted in P1-5d
+   - signup/login/change-password
+   - session validation
+   - password hashing/session issuing helpers
