@@ -255,7 +255,9 @@ private enum class MainTab(val label: String, val route: Route, val imageRes: In
 
 @Composable
 private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () -> Unit) {
-    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as OnMyPlateApp
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val app = context.applicationContext as OnMyPlateApp
+    val activity = context as? MainActivity
     when (route) {
         Route.Login -> LoginScreen(authRepository = app.authRepository, onAuthenticated = onAuthenticated)
         Route.Schedule -> MascotScaffold(selected = MainTab.Schedule, onRoute = onRoute) {
@@ -264,7 +266,25 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () 
             })
         }
         Route.Basket -> MascotScaffold(selected = MainTab.Basket, onRoute = onRoute) {
-            BasketScreen(repository = app.repository, onOpenCandidate = { onRoute(Route.Candidate(it)) })
+            BasketScreen(
+                repository = app.repository,
+                onCreateCandidate = { rawText, onResult ->
+                    val owner = activity
+                    if (owner == null) {
+                        onResult(Result.failure(IllegalStateException("MainActivity is not available.")))
+                    } else {
+                        owner.lifecycleScope.launch {
+                            runCatching {
+                                app.repository.createCandidate(rawText, "internal", System.currentTimeMillis())
+                            }.fold(
+                                onSuccess = { onResult(Result.success(it)) },
+                                onFailure = { onResult(Result.failure(it)) },
+                            )
+                        }
+                    }
+                },
+                onOpenCandidate = { onRoute(Route.Candidate(it)) },
+            )
         }
         Route.Sharing -> SharingScreen(
             plannerRepository = app.repository,

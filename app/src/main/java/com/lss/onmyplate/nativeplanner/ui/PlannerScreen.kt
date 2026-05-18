@@ -24,7 +24,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,7 +37,6 @@ import androidx.compose.ui.unit.dp
 import com.lss.onmyplate.nativeplanner.data.entity.AppointmentCandidateEntity
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.repository.ScheduleOccurrence
-import kotlinx.coroutines.launch
 import java.io.IOException
 import java.time.LocalDate
 import java.time.ZoneId
@@ -49,8 +47,11 @@ private val basketDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 private const val BasketTag = "BasketScreen"
 
 @Composable
-fun BasketScreen(repository: PlannerRepository, onOpenCandidate: (String) -> Unit) {
-    val scope = rememberCoroutineScope()
+fun BasketScreen(
+    repository: PlannerRepository,
+    onCreateCandidate: (String, (Result<AppointmentCandidateEntity>) -> Unit) -> Unit,
+    onOpenCandidate: (String) -> Unit,
+) {
     val context = LocalContext.current
     var directInput by remember { mutableStateOf("") }
     var isCreatingCandidate by remember { mutableStateOf(false) }
@@ -118,22 +119,24 @@ val savedSchedules by repository.observeExpandedSchedules(savedRange.first, save
                             val rawText = directInput.trim()
                             if (rawText.isBlank()) return@Button
                             isCreatingCandidate = true
-                            scope.launch {
-                                saveScheduleError = null
-                                saveScheduleMessage = null
-                                try {
-                                    val candidate = repository.createCandidate(rawText, "internal", System.currentTimeMillis())
-                                    directInput = ""
-                                    saveScheduleMessage = "일정 디테일 설정을 만들었습니다."
-                                    onOpenCandidate(candidate.id)
-                                } catch (error: Throwable) {
-                                    Log.e(BasketTag, "Failed to create appointment detail setup from direct input. textLength=${rawText.length}", error)
-                                    val message = saveScheduleErrorMessage(error)
-                                    saveScheduleError = message
-                                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                                } finally {
-                                    isCreatingCandidate = false
-                                }
+                            saveScheduleError = null
+                            saveScheduleMessage = null
+                            onCreateCandidate(rawText) { result ->
+                                result.fold(
+                                    onSuccess = { candidate ->
+                                        directInput = ""
+                                        saveScheduleMessage = "일정 디테일 설정을 만들었습니다."
+                                        isCreatingCandidate = false
+                                        onOpenCandidate(candidate.id)
+                                    },
+                                    onFailure = { error ->
+                                        Log.e(BasketTag, "Failed to create appointment detail setup from direct input. textLength=${rawText.length}", error)
+                                        val message = saveScheduleErrorMessage(error)
+                                        saveScheduleError = message
+                                        isCreatingCandidate = false
+                                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                    },
+                                )
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
