@@ -10,8 +10,12 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(".")
-PROJECT_REF = "gznuqhjenzeucpmonesl"
-DEFAULT_API_BASE_URL = f"https://{PROJECT_REF}.supabase.co/functions/v1/planner-api"
+DEFAULT_PROJECT_REF = "gznuqhjenzeucpmonesl"
+PROJECT_REF = os.environ.get("SUPABASE_PROJECT_REF", DEFAULT_PROJECT_REF)
+DEFAULT_API_BASE_URL = os.environ.get(
+    "PLANNER_API_BASE_URL",
+    f"https://{PROJECT_REF}.supabase.co/functions/v1/planner-api",
+)
 
 SECRET_PATTERNS = [
     r"GEMINI_API_KEY\s*=\s*[^ \n\r\"']{8,}",

@@ -131,6 +131,16 @@ create table if not exists public.planner_dummy_schedules (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.planner_feedback (
+  id uuid primary key default gen_random_uuid(),
+  user_id text references public.planner_users(id) on delete set null,
+  message text not null,
+  source_screen text not null default 'settings',
+  app_version_name text not null,
+  app_version_code integer not null,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists planner_sessions_user_id_idx on public.planner_sessions(user_id);
 create index if not exists planner_sessions_token_hash_idx on public.planner_sessions(token_hash);
 create index if not exists planner_sessions_active_idx
@@ -143,6 +153,8 @@ create index if not exists planner_personal_schedules_user_start_idx on public.p
 create index if not exists planner_schedule_recurrence_exceptions_schedule_idx on public.planner_schedule_recurrence_exceptions(schedule_id);
 create index if not exists planner_personal_schedule_recurrence_exceptions_schedule_idx on public.planner_personal_schedule_recurrence_exceptions(schedule_id);
 create index if not exists planner_dummy_schedules_group_start_idx on public.planner_dummy_schedules(group_id, start_at);
+create index if not exists planner_feedback_user_created_idx
+  on public.planner_feedback(user_id, created_at desc);
 
 alter table public.planner_users enable row level security;
 alter table public.planner_sessions enable row level security;
@@ -156,6 +168,7 @@ alter table public.planner_schedule_recurrence_exceptions enable row level secur
 alter table public.planner_personal_schedule_recurrence_rules enable row level security;
 alter table public.planner_personal_schedule_recurrence_exceptions enable row level security;
 alter table public.planner_dummy_schedules enable row level security;
+alter table public.planner_feedback enable row level security;
 
 -- Remove policies from the previous anonymous Supabase Auth draft, if present.
 drop policy if exists "profiles are lookupable by authenticated users" on public.planner_profiles;
@@ -191,6 +204,7 @@ revoke all on public.planner_schedule_recurrence_exceptions from anon, authentic
 revoke all on public.planner_personal_schedule_recurrence_rules from anon, authenticated;
 revoke all on public.planner_personal_schedule_recurrence_exceptions from anon, authenticated;
 revoke all on public.planner_dummy_schedules from anon, authenticated;
+revoke all on public.planner_feedback from anon, authenticated;
 
 grant all on public.planner_users to service_role;
 grant all on public.planner_sessions to service_role;
@@ -204,6 +218,7 @@ grant all on public.planner_schedule_recurrence_exceptions to service_role;
 grant all on public.planner_personal_schedule_recurrence_rules to service_role;
 grant all on public.planner_personal_schedule_recurrence_exceptions to service_role;
 grant all on public.planner_dummy_schedules to service_role;
+grant all on public.planner_feedback to service_role;
 
 -- Optional seed data for backend/API smoke tests.
 insert into public.planner_profiles (user_id, public_id, display_name)

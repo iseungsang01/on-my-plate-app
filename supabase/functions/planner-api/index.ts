@@ -639,7 +639,7 @@ async function personalScheduleForUser(userId: string, scheduleId: string): Prom
     .eq("created_by", userId)
     .maybeSingle();
   if (error) throw apiError(500, error.message);
-  if (!data) throw apiError(404, "?쇱젙???李얠쓣 ???놁뒿?덈떎.");
+  if (!data) throw apiError(404, "일정을 찾을 수 없습니다.");
   return data;
 }
 
@@ -711,7 +711,7 @@ async function candidateForUser(userId: string, candidateId: string): Promise<Re
     .eq("created_by", userId)
     .maybeSingle();
   if (error) throw apiError(500, error.message);
-  if (!data) throw apiError(404, "?쎌냽???李얠쓣 ???놁뒿?덈떎.");
+  if (!data) throw apiError(404, "약속 후보를 찾을 수 없습니다.");
   return data;
 }
 
@@ -921,7 +921,7 @@ function readCandidatePayload(body: Record<string, unknown>): Record<string, unk
   const parseSource = readCandidateParseSource(body.parseSource);
   return {
     local_candidate_id: optionalString(body.localCandidateId),
-    raw_text: requiredString(body.rawText, "?쎌냽 ?띿뒪?몄? ?꾩슂?⑸땲??"),
+    raw_text: requiredString(body.rawText, "약속 텍스트가 필요합니다."),
     source_app: optionalString(body.sourceApp),
     extracted_title: optionalString(body.extractedTitle) ?? "",
     extracted_start_at: optionalString(body.extractedStartAt),
