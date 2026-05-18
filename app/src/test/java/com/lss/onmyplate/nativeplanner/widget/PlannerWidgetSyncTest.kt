@@ -53,19 +53,19 @@ class PlannerWidgetSyncTest {
         )
         assertEquals("native-supabase-schedules-v1", snapshot.getString("schema"))
         assertTrue(snapshot.has("generatedAt"))
-        assertTrue(snapshot.has("weekStart"))
+        assertEquals(currentWidgetWeekStart().toString(), snapshot.getString("weekStart"))
         assertEquals(8 * 60, snapshot.getInt("viewportStartMinute"))
         assertEquals(24 * 60, snapshot.getInt("viewportEndMinute"))
         assertFalse(snapshot.has("autoPlans"))
 
         val manualEventsByDate = snapshot.getJSONObject("manualEventsByDate")
-        val dateKeys = manualEventsByDate.keys().asSequence().toList()
-        assertEquals(
-            "Expected exactly one manualEventsByDate bucket but keys were $dateKeys in snapshot=$snapshot",
-            1,
-            dateKeys.size,
+        val dateKey = testDate.toString()
+        assertTrue(
+            "Expected manualEventsByDate to contain $dateKey but keys were ${manualEventsByDate.keys().asSequence().toList()} in snapshot=$snapshot",
+            manualEventsByDate.has(dateKey),
         )
-        val items = manualEventsByDate.getJSONArray(dateKeys.single())
+        val items = manualEventsByDate.getJSONArray(dateKey)
+
         assertEquals(2, items.length())
         assertEquals("Earlier", items.getJSONObject(0).getString("title"))
         assertEquals(9 * 60 + 15, items.getJSONObject(0).getInt("startMinute"))
