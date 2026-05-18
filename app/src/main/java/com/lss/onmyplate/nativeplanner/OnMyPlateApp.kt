@@ -46,9 +46,6 @@ class OnMyPlateApp : Application() {
         super.onCreate()
         instance = this
         notifications.ensureChannels()
-        deleteDatabase("on_my_plate_native.db")
-        deleteDatabase("on_my_plate_native.db-shm")
-        deleteDatabase("on_my_plate_native.db-wal")
         appScope.launch {
             val zone = ZoneId.of("Asia/Seoul")
             val weekStart = LocalDate.now(zone).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))

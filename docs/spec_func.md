@@ -21,9 +21,6 @@
   - 알림 채널을 생성합니다.
   - 현재 주 범위의 단일/반복 occurrence 목록을 관찰하다가 변경될 때마다 `PlannerWidgetSync.saveSnapshot`을 호출해 홈 위젯 데이터를 갱신합니다.
 
-- `deleteDatabase("on_my_plate_native.db")`
-  - 앱 시작 시 기존 Room DB 파일과 WAL/SHM 파일을 삭제합니다.
-  - 앱은 기존 `on_my_plate_native.db`를 읽거나 마이그레이션하지 않습니다.
 
 ---
 
