@@ -70,11 +70,13 @@ def main() -> int:
             print(f"  - {name}")
         return 2
 
-    gradlew = root / "gradlew.bat" if platform.system().lower().startswith("win") else root / "gradlew"
+    is_windows = platform.system().lower().startswith("win")
+    gradlew = root / "gradlew.bat" if is_windows else root / "gradlew"
     gradle_cmd = [str(gradlew), ":app:publishAab", "--no-daemon"]
+    run_cmd = ["cmd", "/c", *gradle_cmd] if is_windows else gradle_cmd
 
     print("Running:", " ".join(gradle_cmd))
-    completed = subprocess.run(gradle_cmd, cwd=root)
+    completed = subprocess.run(run_cmd, cwd=root)
     if completed.returncode == 0:
         aab_path = root / "app" / "build" / "outputs" / "bundle" / "release" / "app-release.aab"
         print(f"AAB: {aab_path}")
