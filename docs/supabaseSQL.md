@@ -81,13 +81,20 @@ create table if not exists public.planner_personal_schedules (
 
 create table if not exists public.planner_schedule_recurrence_rules (
   schedule_id uuid primary key references public.planner_schedules(id) on delete cascade,
-  frequency text not null check (frequency in ('weekly')),
-  interval_weeks integer not null default 1 check (interval_weeks >= 1),
-  day_of_week integer not null check (day_of_week between 1 and 7),
+  frequency text not null check (frequency in ('daily', 'weekly', 'monthly')),
+  interval integer not null default 1 check (interval >= 1),
+  interval_weeks integer check (interval_weeks is null or interval_weeks >= 1),
+  day_of_week integer check (day_of_week is null or day_of_week between 1 and 7),
+  day_of_month integer check (day_of_month is null or day_of_month between 1 and 31),
   until_at timestamptz,
   count integer check (count is null or count > 0),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint planner_schedule_recurrence_rules_anchor_check check (
+    (frequency = 'daily' and day_of_week is null and day_of_month is null)
+    or (frequency = 'weekly' and day_of_week is not null and day_of_month is null)
+    or (frequency = 'monthly' and day_of_week is null and day_of_month is not null)
+  )
 );
 
 create table if not exists public.planner_schedule_recurrence_exceptions (
@@ -100,13 +107,20 @@ create table if not exists public.planner_schedule_recurrence_exceptions (
 
 create table if not exists public.planner_personal_schedule_recurrence_rules (
   schedule_id uuid primary key references public.planner_personal_schedules(id) on delete cascade,
-  frequency text not null check (frequency in ('weekly')),
-  interval_weeks integer not null default 1 check (interval_weeks >= 1),
-  day_of_week integer not null check (day_of_week between 1 and 7),
+  frequency text not null check (frequency in ('daily', 'weekly', 'monthly')),
+  interval integer not null default 1 check (interval >= 1),
+  interval_weeks integer check (interval_weeks is null or interval_weeks >= 1),
+  day_of_week integer check (day_of_week is null or day_of_week between 1 and 7),
+  day_of_month integer check (day_of_month is null or day_of_month between 1 and 31),
   until_at timestamptz,
   count integer check (count is null or count > 0),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint planner_personal_schedule_recurrence_rules_anchor_check check (
+    (frequency = 'daily' and day_of_week is null and day_of_month is null)
+    or (frequency = 'weekly' and day_of_week is not null and day_of_month is null)
+    or (frequency = 'monthly' and day_of_week is null and day_of_month is not null)
+  )
 );
 
 create table if not exists public.planner_personal_schedule_recurrence_exceptions (

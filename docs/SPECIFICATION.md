@@ -180,9 +180,19 @@ Near-term improvement without Room:
 - Conflict detection assumes a default one-hour duration when end time is missing.
 - Recurrence expansion is performed on Android for displayed occurrences.
 
-### Recurrence Warning
+### Recurrence Contract
 
-Android and `planner-api` currently model daily, weekly, and monthly recurrence inputs. Check the deployed SQL schema before enabling all recurrence types. Older SQL drafts constrain recurrence tables to weekly-only, which can reject daily/monthly writes.
+Android and `planner-api` support `daily`, `weekly`, and `monthly` recurrence.
+
+The deployed Supabase schema must match this contract:
+
+- `frequency in ('daily', 'weekly', 'monthly')`
+- `interval >= 1`
+- `day_of_week` is required only for weekly recurrence
+- `day_of_month` is required only for monthly recurrence
+- daily recurrence must not require weekday or month-day anchors
+
+For existing deployments based on older weekly-only SQL, run `docs/supabaseRecurrenceMigration.sql` before testing daily/monthly recurrence writes.
 
 ## File Map
 
