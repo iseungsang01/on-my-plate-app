@@ -9,6 +9,15 @@ create table if not exists public.planner_users (
     check (id ~ '^[A-Za-z0-9._-]{3,40}$')
 );
 
+create table if not exists public.planner_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references public.planner_users(id) on delete cascade,
+  token_hash text not null unique,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  revoked_at timestamptz
+);
+
 create table if not exists public.planner_profiles (
   user_id text primary key,
   public_id text not null unique,
@@ -161,24 +170,60 @@ create table if not exists public.planner_candidates (
   extracted_location text,
   confidence double precision not null default 0,
   time_confidence text not null default '',
+  parse_source text not null default 'unknown',
   status text not null default 'pending' check (status in ('pending', 'confirmed', 'discarded')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (created_by, local_candidate_id)
+  unique (created_by, local_candidate_id),
+  constraint planner_candidates_parse_source_check
+    check (parse_source in ('llm_success', 'llm_with_local_supplement', 'local_fallback', 'parser_error', 'local_only', 'unknown'))
 );
 
-create index if not exists planner_profiles_public_id_idx on public.planner_profiles(public_id);
-create index if not exists planner_group_members_user_id_idx on public.planner_group_members(user_id);
-create index if not exists planner_schedules_group_start_idx on public.planner_schedules(group_id, start_at);
-create index if not exists planner_personal_schedules_user_start_idx on public.planner_personal_schedules(created_by, start_at);
-create index if not exists planner_schedule_recurrence_exceptions_schedule_idx on public.planner_schedule_recurrence_exceptions(schedule_id);
-create index if not exists planner_personal_schedule_recurrence_exceptions_schedule_idx on public.planner_personal_schedule_recurrence_exceptions(schedule_id);
-create index if not exists planner_dummy_schedules_group_start_idx on public.planner_dummy_schedules(group_id, start_at);
-create index if not exists planner_feedback_created_at_idx on public.planner_feedback(created_at desc);
-create index if not exists planner_feedback_user_id_idx on public.planner_feedback(user_id);
-create index if not exists planner_candidates_user_status_created_idx on public.planner_candidates(created_by, status, created_at desc);
+create index if not exists planner_sessions_user_id_idx
+  on public.planner_sessions(user_id);
+
+create index if not exists planner_sessions_token_hash_idx
+  on public.planner_sessions(token_hash);
+
+create index if not exists planner_sessions_active_idx
+  on public.planner_sessions(token_hash, expires_at)
+  where revoked_at is null;
+
+create index if not exists planner_profiles_public_id_idx
+  on public.planner_profiles(public_id);
+
+create index if not exists planner_group_members_user_id_idx
+  on public.planner_group_members(user_id);
+
+create index if not exists planner_schedules_group_start_idx
+  on public.planner_schedules(group_id, start_at);
+
+create index if not exists planner_personal_schedules_user_start_idx
+  on public.planner_personal_schedules(created_by, start_at);
+
+create index if not exists planner_schedule_recurrence_exceptions_schedule_idx
+  on public.planner_schedule_recurrence_exceptions(schedule_id);
+
+create index if not exists planner_personal_schedule_recurrence_exceptions_schedule_idx
+  on public.planner_personal_schedule_recurrence_exceptions(schedule_id);
+
+create index if not exists planner_dummy_schedules_group_start_idx
+  on public.planner_dummy_schedules(group_id, start_at);
+
+create index if not exists planner_feedback_created_at_idx
+  on public.planner_feedback(created_at desc);
+
+create index if not exists planner_feedback_user_id_idx
+  on public.planner_feedback(user_id);
+
+create index if not exists planner_feedback_user_created_idx
+  on public.planner_feedback(user_id, created_at desc);
+
+create index if not exists planner_candidates_user_status_created_idx
+  on public.planner_candidates(created_by, status, created_at desc);
 
 alter table public.planner_users enable row level security;
+alter table public.planner_sessions enable row level security;
 alter table public.planner_profiles enable row level security;
 alter table public.planner_groups enable row level security;
 alter table public.planner_group_members enable row level security;
@@ -211,6 +256,7 @@ drop policy if exists "creators update dummy schedules" on public.planner_dummy_
 drop policy if exists "creators delete dummy schedules" on public.planner_dummy_schedules;
 
 revoke all on public.planner_users from anon, authenticated;
+revoke all on public.planner_sessions from anon, authenticated;
 revoke all on public.planner_profiles from anon, authenticated;
 revoke all on public.planner_groups from anon, authenticated;
 revoke all on public.planner_group_members from anon, authenticated;
@@ -225,6 +271,7 @@ revoke all on public.planner_feedback from anon, authenticated;
 revoke all on public.planner_candidates from anon, authenticated;
 
 grant all on public.planner_users to service_role;
+grant all on public.planner_sessions to service_role;
 grant all on public.planner_profiles to service_role;
 grant all on public.planner_groups to service_role;
 grant all on public.planner_group_members to service_role;
@@ -237,3 +284,43 @@ grant all on public.planner_personal_schedule_recurrence_exceptions to service_r
 grant all on public.planner_dummy_schedules to service_role;
 grant all on public.planner_feedback to service_role;
 grant all on public.planner_candidates to service_role;
+
+create or replace function public.delete_personal_schedule(
+  p_user_id text,
+  p_schedule_id uuid
+)
+returns boolean
+language plpgsql
+as $$
+declare
+  deleted_count integer;
+begin
+  if not exists (
+    select 1
+    from public.planner_personal_schedules
+    where id = p_schedule_id
+      and created_by = p_user_id
+  ) then
+    return false;
+  end if;
+
+  delete from public.planner_personal_schedule_recurrence_exceptions
+  where schedule_id = p_schedule_id;
+
+  delete from public.planner_personal_schedule_recurrence_rules
+  where schedule_id = p_schedule_id;
+
+  delete from public.planner_personal_schedules
+  where id = p_schedule_id
+    and created_by = p_user_id;
+
+  get diagnostics deleted_count = row_count;
+  return deleted_count = 1;
+end;
+$$;
+
+revoke all on function public.delete_personal_schedule(text, uuid) from public;
+revoke all on function public.delete_personal_schedule(text, uuid) from anon, authenticated;
+grant execute on function public.delete_personal_schedule(text, uuid) to service_role;
+
+notify pgrst, 'reload schema';
