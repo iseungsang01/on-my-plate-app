@@ -128,11 +128,6 @@ Recommended future hybrid model if needed:
 7. Repository exposes Room-backed flows and separately triggers API refreshes.
 8. Conflict detection uses Room for immediate checks and API refresh for final consistency.
 
-
-### Legacy Room Naming Note
-
-`ScheduleEntity` and `AppointmentCandidateEntity` are currently plain Kotlin data classes used across the repository/API boundary. They are not Room entities unless Room annotations and DAO/database wiring are reintroduced. Avoid creating new DAO/database code for the current MVP.
-
 ## Widget Freshness Strategy
 
 Current behavior:

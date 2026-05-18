@@ -45,7 +45,7 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
 
     @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
-        PlannerWidgetSync.INSTANCE.syncFromPlannerApiSnapshot(context);
+        PlannerWidgetSync.INSTANCE.syncFromPlannerDatabase(context);
         for (int appWidgetId : appWidgetIds) {
             appWidgetManager.updateAppWidget(appWidgetId, buildRemoteViews(context, appWidgetManager, appWidgetId));
         }
@@ -54,7 +54,7 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
     @Override
     public void onAppWidgetOptionsChanged(Context context, AppWidgetManager appWidgetManager, int appWidgetId, Bundle newOptions) {
         super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions);
-        PlannerWidgetSync.INSTANCE.syncFromPlannerApiSnapshot(context);
+        PlannerWidgetSync.INSTANCE.syncFromPlannerDatabase(context);
         appWidgetManager.updateAppWidget(appWidgetId, buildRemoteViews(context, appWidgetManager, appWidgetId));
     }
 

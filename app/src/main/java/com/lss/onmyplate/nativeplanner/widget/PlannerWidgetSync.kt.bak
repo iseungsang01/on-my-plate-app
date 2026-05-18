@@ -18,7 +18,7 @@ object PlannerWidgetSync {
     private val zoneId: ZoneId = ZoneId.of("Asia/Seoul")
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    fun syncFromPlannerApiSnapshot(context: Context) {
+    fun syncFromPlannerDatabase(context: Context) {
         val appContext = context.applicationContext
         syncScope.launch {
             val app = appContext as? OnMyPlateApp

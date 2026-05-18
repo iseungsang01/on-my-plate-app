@@ -1,0 +1,55 @@
+Room reference scan report
+==========================
+
+Interpretation:
+- References inside docs/SPECIFICATION.md explaining no-Room policy are expected.
+- Plain data class names ending with Entity are acceptable if they have no Room annotations.
+- Any androidx.room, @Dao, @Database, or AppDatabase references should be removed unless Room is intentionally reintroduced.
+
+Matches:
+
+.omx/context/text-share-schedule-db-20260515T164122Z.md:15: - OnMyPlateApp.onCreate deletes old Room DB files (on_my_plate_native.db, shm, wal); current entity classes are plain data classes, not Room annotations.
+docs/spec_func.md:161: - Room annotation 없이 앱 내부에서 개인 일정 API 응답과 UI 상태를 전달하는 일정 모델입니다.
+docs/spec_func.md:164: - Room annotation 없이 앱 내부에서 후보 API 응답과 UI 상태를 전달하는 후보 모델입니다.
+docs/spec_func.md:167: - Room annotation 없이 반복 규칙과 skip 예외 API 응답을 표현하는 모델입니다.
+docs/spec_func.md:619: - `syncFromPlannerDatabase(context)`
+docs/SPECIFICATION.ko.md:16: 10. 저장된 일정은 Room에서 `PlannerWidgetSync`로 흐른 뒤 네이티브 위젯 스냅샷에 반영됩니다.
+docs/SPECIFICATION.ko.md:44: - `AppDatabase`, `KoreanAppointmentParser`, `PlannerRepository`, `AppointmentNotificationManager`를 생성합니다.
+docs/SPECIFICATION.ko.md:98: `data/db/AppDatabase.kt`
+docs/SPECIFICATION.ko.md:100: - Room database 정의입니다.
+docs/SPECIFICATION.ko.md:106: - 공유 텍스트 후보용 Room entity입니다.
+docs/SPECIFICATION.ko.md:112: - 저장된 일정용 Room entity입니다.
+docs/SPECIFICATION.ko.md:115: `data/dao/AppointmentCandidateDao.kt`
+docs/SPECIFICATION.ko.md:122: `data/dao/ScheduleDao.kt`
+docs/SPECIFICATION.ko.md:198: - Room 일정을 위젯 스냅샷 형식으로 변환합니다.
+docs/SPECIFICATION.ko.md:199: - `syncFromPlannerDatabase`: 저장된 일정을 로드하고 스냅샷을 씁니다.
+docs/SPECIFICATION.ko.md:244: - Room 일정에서 위젯 스냅샷이 생성되는지 검증합니다.
+docs/SPECIFICATION.ko.md:248: - Local Room remains the source of truth for personal schedules, conflict checks, candidate parsing, and widget snapshots.
+docs/SPECIFICATION.ko.md:254: - Only selected local schedules are uploaded to `planner-api`; they remain independent copies of Room rows.
+docs/SPECIFICATION.ko.md:255: - Shared-screen-only dummy schedules are read through the API but are never inserted into Room, conflict detection, notifications, or widget snapshots.
+docs/SPECIFICATION.md:10: - Android does not currently use Room as the runtime source of truth for personal schedules or appointment candidates.
+docs/SPECIFICATION.md:12: - The native home-screen widget reads a generated SharedPreferences snapshot, not Room.
+docs/SPECIFICATION.md:15: Room is not required for the current MVP. A stale widget snapshot is acceptable, but an empty snapshot after transient network failure is not. Therefore the preferred near-term policy is to keep the last valid snapshot and refresh opportunistically, instead of adding Room only for widget freshness.
+docs/SPECIFICATION.md:84: The method name `syncFromPlannerApiSnapshot` is historical. In the current implementation, it syncs from the planner repository/API path, not from Room.
+docs/SPECIFICATION.md:86: ## Room Decision
+docs/SPECIFICATION.md:88: Do not reintroduce Room for the current MVP.
+docs/SPECIFICATION.md:96: - Room would introduce an additional synchronization layer, ID-mapping complexity, migration cost, and conflict semantics before offline editing is actually required.
+docs/SPECIFICATION.md:98: Use SharedPreferences snapshot retention instead of Room for widget robustness.
+docs/SPECIFICATION.md:109: Reconsider Room only if the product requires one or more of the following:
+docs/SPECIFICATION.md:118: If Room is reintroduced later, use it as a local mirror of API state, not as a competing source of truth.
+docs/SPECIFICATION.md:123: 2. Room stores mirrored personal schedules, recurrence rules, recurrence exceptions, and pending candidates.
+docs/SPECIFICATION.md:125: 4. On successful API response, Room is updated transactionally from the returned server object.
+docs/SPECIFICATION.md:126: 5. If offline writes are supported, Room also stores a `pending_ops` queue.
+docs/SPECIFICATION.md:127: 6. Widget snapshots are generated from Room synchronously.
+docs/SPECIFICATION.md:128: 7. Repository exposes Room-backed flows and separately triggers API refreshes.
+docs/SPECIFICATION.md:129: 8. Conflict detection uses Room for immediate checks and API refresh for final consistency.
+docs/SPECIFICATION.md:132: ### Legacy Room Naming Note
+docs/SPECIFICATION.md:134: `ScheduleEntity` and `AppointmentCandidateEntity` are currently plain Kotlin data classes used across the repository/API boundary. They are not Room entities unless Room annotations and DAO/database wiring are reintroduced. Avoid creating new DAO/database code for the current MVP.
+docs/SPECIFICATION.md:152: Near-term improvement without Room:
+docs/SPECIFICATION.md:528: - Room-related historical names may mislead future development.
+docs/SUPABASE_SHARING_REDESIGN.md:359: - 로컬 Room 일정은 그대로 유지
+docs/SUPABASE_SHARING_REDESIGN.md:362: - 더미 일정은 Room/위젯에 저장하지 않음
+docs/supabaseSQL.md:272: '이 일정은 Room에 저장되지 않는 공유 화면 전용 더미 일정입니다'
+README.ko.md:84: Android never stores service-role credentials, does not read the old `on_my_plate_native.db` Room database, and no longer depends on any PC-local backend. Shared-screen-only dummy schedules are read from `planner_dummy_schedules` through the API and are never stored in personal schedules or the widget. See `docs/supabaseSQL.md` for the server-side schema and RLS posture.
+README.md:86: The Android app never stores service-role credentials, does not read the old `on_my_plate_native.db` Room database, and no longer depends on any PC-local backend. Shared-screen-only fake entries live in `planner_dummy_schedules` and are never copied into personal schedules or the home widget. See `docs/supabaseSQL.md` for the server-side schema and RLS posture.
+widget/README.md:19: The native Android MVP in the repository root uses a narrower model. Its `PlannerWidgetSync` exports only Room-backed schedules as `manualEventsByDate` with schema `native-room-schedules-v1`; it does not export `autoPlans`, category columns, or `days`. That difference is intentional until the native app owns an auto/category planner model.
