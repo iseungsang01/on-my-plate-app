@@ -3,7 +3,7 @@
 import { db, hasSupabaseConfig } from "./db.ts";
 import { parseAppointment } from "./parser.ts";
 import { apiError, corsHeaders, errorResponse, jsonResponse, readJson, toApiError } from "./http.ts";
-import { optionalUserId, requireUserId } from "./auth.ts";
+import { changePassword, login, optionalUserId, requireUserId, signUp } from "./auth.ts";
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 type JsonObject = { [key: string]: JsonValue };
@@ -42,13 +42,7 @@ type RecurrenceExceptionInput = {
 };
 
 const FUNCTION_NAME = "planner-api";
-const PASSWORD_HASH_PREFIX = "pbkdf2-sha256$v1$";
-const LEGACY_SHA256_HASH_PREFIX = "sha256$v1$";
-const PASSWORD_HASH_ITERATIONS = 120_000;
 const PUBLIC_ID_PREFIX = "pb";
-const SESSION_TOKEN_PREFIX = "omp_session_v1_";
-const SESSION_TTL_DAYS = Number(Deno.env.get("PLANNER_SESSION_TTL_DAYS") ?? "30");
-const SESSION_TTL_MS = Math.max(1, SESSION_TTL_DAYS) * 24 * 60 * 60 * 1000;
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -154,182 +148,6 @@ function normalizePath(pathname: string): string {
     ? pathname.slice(index + marker.length)
     : pathname.replace(/^\/functions\/v1(?=\/|$)/, "");
   return stripped.startsWith("/") ? stripped : `/${stripped}`;
-}
-
-async function signUp(request: Request): Promise<Response> {
-  const credentials = await readCredentials(request);
-  const passwordHash = await hashPassword(credentials.id, credentials.password);
-  const { error } = await db.from("planner_users").insert({
-    id: credentials.id,
-    password_hash: passwordHash,
-  });
-  if (error?.code === "23505") throw apiError(409, "이미 사용 중인 아이디입니다.");
-  if (error) throw apiError(500, error.message);
-
-  await ensureProfile(credentials.id);
-  return await authResponse(credentials.id);
-}
-
-async function login(request: Request): Promise<Response> {
-  const credentials = await readCredentials(request);
-  const { data: user, error } = await db
-    .from("planner_users")
-    .select("id,password_hash")
-    .eq("id", credentials.id)
-    .maybeSingle();
-  if (error) throw apiError(500, error.message);
-
-  if (!user) {
-    throw apiError(401, "아이디 또는 비밀번호가 올바르지 않습니다.");
-  }
-
-  const matches = await verifyPassword(credentials.id, credentials.password, String(user.password_hash));
-  if (!matches) {
-    throw apiError(401, "아이디 또는 비밀번호가 올바르지 않습니다.");
-  }
-
-  if (!isPasswordHash(String(user.password_hash))) {
-    await updatePasswordHash(credentials.id, credentials.password);
-  }
-
-  await ensureProfile(credentials.id);
-  return await authResponse(credentials.id);
-}
-
-async function changePassword(request: Request): Promise<Response> {
-  const userId = await requireUserId(request);
-  const body = await readJson(request);
-  const currentPassword = requiredString(body.currentPassword, "현재 비밀번호를 입력하세요.");
-  const newPassword = requiredString(body.newPassword, "새 비밀번호를 입력하세요.");
-  if (newPassword.length < 6) throw apiError(400, "새 비밀번호는 6자 이상이어야 합니다.");
-
-  const { data: user, error } = await db
-    .from("planner_users")
-    .select("id,password_hash")
-    .eq("id", userId)
-    .maybeSingle();
-  if (error) throw apiError(500, error.message);
-  if (!user) throw apiError(401, "로그인이 필요합니다.");
-
-  const matches = await verifyPassword(userId, currentPassword, String(user.password_hash));
-  if (!matches) throw apiError(401, "현재 비밀번호가 올바르지 않습니다.");
-
-  await updatePasswordHash(userId, newPassword);
-  return jsonResponse({ ok: true });
-}
-
-async function readCredentials(request: Request): Promise<{ id: string; password: string }> {
-  const body = await readJson(request);
-  const id = normalizeIdentifier(body.id);
-  const password = requiredString(body.password, "비밀번호를 입력하세요.");
-  if (password.length < 6) throw apiError(400, "비밀번호는 6자 이상이어야 합니다.");
-  return { id, password };
-}
-
-async function hashPassword(id: string, password: string): Promise<string> {
-  return await hashPasswordWithIterations(id, password, PASSWORD_HASH_ITERATIONS);
-}
-
-async function hashPasswordWithIterations(id: string, password: string, iterations: number): Promise<string> {
-  const encoder = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"],
-  );
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      hash: "SHA-256",
-      salt: encoder.encode(`planner-user:${id}`),
-      iterations,
-    },
-    keyMaterial,
-    256,
-  );
-  return `${PASSWORD_HASH_PREFIX}${iterations}$${toHex(bits)}`;
-}
-
-async function legacySha256HashPassword(id: string, password: string): Promise<string> {
-  const bytes = new TextEncoder().encode(`${id}:${password}`);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return `${LEGACY_SHA256_HASH_PREFIX}${toHex(digest)}`;
-}
-
-function isPasswordHash(value: string): boolean {
-  return value.startsWith(PASSWORD_HASH_PREFIX) || value.startsWith(LEGACY_SHA256_HASH_PREFIX);
-}
-
-async function verifyPassword(id: string, password: string, storedPasswordHash: string): Promise<boolean> {
-  if (storedPasswordHash.startsWith(PASSWORD_HASH_PREFIX)) {
-    const [rawIterations] = storedPasswordHash.slice(PASSWORD_HASH_PREFIX.length).split("$");
-    const iterations = Number(rawIterations);
-    if (!Number.isInteger(iterations) || iterations < 1) return false;
-    return (await hashPasswordWithIterations(id, password, iterations)) === storedPasswordHash;
-  }
-  if (storedPasswordHash.startsWith(LEGACY_SHA256_HASH_PREFIX)) {
-    return (await legacySha256HashPassword(id, password)) === storedPasswordHash;
-  }
-  if (!isPasswordHash(storedPasswordHash)) {
-    return password === storedPasswordHash;
-  }
-  return false;
-}
-
-async function updatePasswordHash(id: string, password: string): Promise<void> {
-  const { error } = await db
-    .from("planner_users")
-    .update({ password_hash: await hashPassword(id, password), updated_at: new Date().toISOString() })
-    .eq("id", id);
-  if (error) throw apiError(500, error.message);
-}
-
-function toHex(buffer: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buffer))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-async function authResponse(id: string): Promise<Response> {
-  const token = createSessionToken();
-  const tokenHash = await hashSessionToken(token);
-  const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
-  const { error } = await db.from("planner_sessions").insert({
-    user_id: id,
-    token_hash: tokenHash,
-    expires_at: expiresAt,
-  });
-  if (error) throw apiError(500, error.message);
-  return jsonResponse({ sessionToken: token, userId: id, expiresAt });
-}
-
-function createSessionToken(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return `${SESSION_TOKEN_PREFIX}${base64Url(bytes)}`;
-}
-
-async function hashSessionToken(token: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-  return toHex(digest);
-}
-
-function base64Url(bytes: Uint8Array): string {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  let output = "";
-  for (let index = 0; index < bytes.length; index += 3) {
-    const first = bytes[index];
-    const second = bytes[index + 1];
-    const third = bytes[index + 2];
-
-    output += alphabet[first >> 2];
-    output += alphabet[((first & 0x03) << 4) | ((second ?? 0) >> 4)];
-    output += index + 1 < bytes.length ? alphabet[((second & 0x0f) << 2) | ((third ?? 0) >> 6)] : "=";
-    output += index + 2 < bytes.length ? alphabet[(third ?? 0) & 0x3f] : "=";
-  }
-  return output.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 async function profile(userId: string): Promise<Response> {

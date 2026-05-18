@@ -1,4 +1,18 @@
-/// <reference lib="deno.ns" />
+
+from pathlib import Path
+import shutil
+import sys
+
+ROOT = Path.cwd()
+BASE = ROOT / "supabase" / "functions" / "planner-api"
+INDEX = BASE / "index.ts"
+AUTH = BASE / "auth.ts"
+MODULES = BASE / "MODULES.md"
+
+AUTH_BLOCK_START = "async function signUp(request: Request): Promise<Response> {"
+AUTH_BLOCK_END = "\n\nasync function profile(userId: string): Promise<Response> {"
+
+AUTH_TS_CONTENT = """/// <reference lib="deno.ns" />
 
 import { db } from "./db.ts";
 import { apiError, jsonResponse, readJson } from "./http.ts";
@@ -176,7 +190,7 @@ async function userIdFromSession(request: Request, required: boolean): Promise<s
     if (required) throw apiError(401, "로그인이 필요합니다.");
     return null;
   }
-  const match = header.match(/^Bearer\s+(.+)$/i);
+  const match = header.match(/^Bearer\\s+(.+)$/i);
   if (!match) throw apiError(401, "로그인이 필요합니다.");
 
   const token = match[1].trim();
@@ -222,7 +236,7 @@ function base64Url(bytes: Uint8Array): string {
     output += index + 1 < bytes.length ? alphabet[((second & 0x0f) << 2) | ((third ?? 0) >> 6)] : "=";
     output += index + 2 < bytes.length ? alphabet[(third ?? 0) & 0x3f] : "=";
   }
-  return output.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return output.replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
 }
 
 function toHex(buffer: ArrayBuffer): string {
@@ -265,3 +279,104 @@ function requiredString(value: unknown, message: string): string {
   if (typeof value !== "string" || value.trim().length === 0) throw apiError(400, message);
   return value;
 }
+"""
+
+def ok(msg: str) -> None:
+    print(f"[OK] {msg}")
+
+def fail(msg: str) -> None:
+    print(f"[FAIL] {msg}")
+    sys.exit(1)
+
+def backup(path: Path) -> None:
+    bak = path.with_suffix(path.suffix + ".bak")
+    if not bak.exists():
+        shutil.copy2(path, bak)
+        ok(f"backup created: {bak}")
+    else:
+        ok(f"backup exists: {bak}")
+
+for path in [INDEX, AUTH]:
+    if not path.exists():
+        fail(f"missing file: {path}")
+
+index_text = INDEX.read_text(encoding="utf-8")
+auth_text = AUTH.read_text(encoding="utf-8")
+
+if "export async function signUp" in auth_text and "async function signUp(request: Request)" not in index_text:
+    ok("auth routes already extracted")
+else:
+    if AUTH_BLOCK_START not in index_text:
+        fail("index.ts auth route block start not found")
+    if AUTH_BLOCK_END not in index_text:
+        fail("index.ts auth route block end not found")
+    before, rest = index_text.split(AUTH_BLOCK_START, 1)
+    _, after = rest.split(AUTH_BLOCK_END, 1)
+    index_text = before + "async function profile(userId: string): Promise<Response> {" + after
+    ok("removed auth route handler block from index.ts")
+
+    old_import = 'import { optionalUserId, requireUserId } from "./auth.ts";'
+    new_import = 'import { changePassword, login, optionalUserId, requireUserId, signUp } from "./auth.ts";'
+    if old_import in index_text:
+        index_text = index_text.replace(old_import, new_import, 1)
+        ok("expanded auth import in index.ts")
+    elif new_import in index_text:
+        ok("auth import already expanded")
+    else:
+        fail("auth import anchor not found in index.ts")
+
+    constants_old = """const FUNCTION_NAME = "planner-api";
+const PASSWORD_HASH_PREFIX = "pbkdf2-sha256$v1$";
+const LEGACY_SHA256_HASH_PREFIX = "sha256$v1$";
+const PASSWORD_HASH_ITERATIONS = 120_000;
+const PUBLIC_ID_PREFIX = "pb";
+const SESSION_TOKEN_PREFIX = "omp_session_v1_";
+const SESSION_TTL_DAYS = Number(Deno.env.get("PLANNER_SESSION_TTL_DAYS") ?? "30");
+const SESSION_TTL_MS = Math.max(1, SESSION_TTL_DAYS) * 24 * 60 * 60 * 1000;
+"""
+    constants_new = """const FUNCTION_NAME = "planner-api";
+const PUBLIC_ID_PREFIX = "pb";
+"""
+    if constants_old in index_text:
+        index_text = index_text.replace(constants_old, constants_new, 1)
+        ok("removed auth-only constants from index.ts")
+    else:
+        ok("auth-only constants already absent or manually changed")
+
+    backup(INDEX)
+    INDEX.write_text(index_text, encoding="utf-8")
+    ok("updated index.ts")
+
+    backup(AUTH)
+    AUTH.write_text(AUTH_TS_CONTENT, encoding="utf-8")
+    ok("rewrote auth.ts with route handlers")
+
+if MODULES.exists():
+    modules = MODULES.read_text(encoding="utf-8")
+    original_modules = modules
+    if "- `auth.ts`" not in modules:
+        parser_anchor = "\n- `parser.ts`\n"
+        auth_current = "\n- `auth.ts`\n  - signup/login/change-password routes\n  - session validation\n  - password hashing/session issuing helpers\n"
+        if parser_anchor in modules:
+            modules = modules.replace(parser_anchor, auth_current + parser_anchor, 1)
+            ok("added auth.ts to MODULES.md current map")
+    if "  - auth routes\n" in modules:
+        modules = modules.replace("  - auth routes\n", "", 1)
+        ok("removed stale auth route bullet from index.ts module map")
+    if "`auth.ts` ✅ route/session extracted in P1-5d" not in modules and "`auth.ts`" in modules:
+        modules = modules.replace(
+            "3. `auth.ts`",
+            "3. `auth.ts` ✅ route/session extracted in P1-5d",
+            1,
+        )
+        ok("marked auth.ts target status")
+    if modules != original_modules:
+        backup(MODULES)
+        MODULES.write_text(modules, encoding="utf-8")
+        ok("updated MODULES.md")
+    else:
+        ok("MODULES.md unchanged")
+else:
+    ok("MODULES.md missing; skipped docs update")
+
+ok("P1-5d-2 fix complete: auth routes extracted")
