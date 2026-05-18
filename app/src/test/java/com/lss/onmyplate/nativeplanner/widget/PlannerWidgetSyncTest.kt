@@ -31,26 +31,19 @@ class PlannerWidgetSyncTest {
     }
 
     @Test
-    fun saveSnapshotStoresNativeManualEventsGroupedByDate() {
+    fun buildSnapshotStoresNativeManualEventsGroupedByDate() {
         val testDate = currentWidgetWeekStart().plusDays(3)
         val firstStart = epochMillis(testDate, 9, 15)
         val secondStart = epochMillis(testDate, 11, 0)
-
-        PlannerWidgetSync.saveSnapshot(
-            context,
-            listOf(
-                occurrence(schedule(id = "later", title = "Later", startAt = secondStart, endAt = secondStart + 45 * 60 * 1_000L)),
-                occurrence(schedule(id = "earlier", title = "Earlier", startAt = firstStart, endAt = firstStart + 60 * 60 * 1_000L)),
-            ),
-            refreshWidgets = false,
+        val occurrences = listOf(
+            occurrence(schedule(id = "later", title = "Later", startAt = secondStart, endAt = secondStart + 45 * 60 * 1_000L)),
+            occurrence(schedule(id = "earlier", title = "Earlier", startAt = firstStart, endAt = firstStart + 60 * 60 * 1_000L)),
         )
 
-        val snapshot = JSONObject(
-            requireNotNull(
-                PlannerWidgetStore.getPrefs(context)
-                    .getString(PlannerWidgetStore.KEY_SUMMARY_SNAPSHOT, null),
-            ),
-        )
+        assertEquals(2, occurrences.size)
+
+        val snapshot = PlannerWidgetSync.buildSnapshot(occurrences)
+
         assertEquals("native-supabase-schedules-v1", snapshot.getString("schema"))
         assertTrue(snapshot.has("generatedAt"))
         assertEquals(currentWidgetWeekStart().toString(), snapshot.getString("weekStart"))
@@ -70,27 +63,37 @@ class PlannerWidgetSyncTest {
         assertEquals("Earlier", items.getJSONObject(0).getString("title"))
         assertEquals(9 * 60 + 15, items.getJSONObject(0).getInt("startMinute"))
         assertEquals(10 * 60 + 15, items.getJSONObject(0).getInt("endMinute"))
-        assertEquals("manual", items.getJSONObject(0).optString("source", "manual"))
-        assertFalse(items.getJSONObject(0).optBoolean("isRecurring", false))
+        assertEquals("manual", items.getJSONObject(0).getString("source"))
+        assertFalse(items.getJSONObject(0).getBoolean("isRecurring"))
         assertEquals("Later", items.getJSONObject(1).getString("title"))
     }
 
     @Test
-    fun saveSnapshotUsesDefaultOneHourEndWithMinimumThirtyMinutesAfterMidnightRollover() {
-        val testDate = currentWidgetWeekStart().plusDays(6)
-        val startAt = epochMillis(testDate, 23, 45)
+    fun saveSnapshotWritesSummarySnapshotPreference() {
+        val testDate = currentWidgetWeekStart().plusDays(3)
+        val startAt = epochMillis(testDate, 12, 30)
 
         PlannerWidgetSync.saveSnapshot(
             context,
-            listOf(occurrence(schedule(id = "open-ended", title = "Open Ended", startAt = startAt, endAt = null))),
+            listOf(occurrence(schedule(id = "saved", title = "Saved", startAt = startAt, endAt = startAt + 30 * 60 * 1_000L))),
             refreshWidgets = false,
         )
 
-        val event = JSONObject(
-            requireNotNull(
-                PlannerWidgetStore.getPrefs(context)
-                    .getString(PlannerWidgetStore.KEY_SUMMARY_SNAPSHOT, null),
-            ),
+        val snapshotText = PlannerWidgetStore.getPrefs(context)
+            .getString(PlannerWidgetStore.KEY_SUMMARY_SNAPSHOT, null)
+        requireNotNull(snapshotText)
+        val snapshot = JSONObject(snapshotText)
+        assertEquals("native-supabase-schedules-v1", snapshot.getString("schema"))
+        assertTrue(snapshot.getJSONObject("manualEventsByDate").has(testDate.toString()))
+    }
+
+    @Test
+    fun buildSnapshotUsesDefaultOneHourEndWithMinimumThirtyMinutesAfterMidnightRollover() {
+        val testDate = currentWidgetWeekStart().plusDays(6)
+        val startAt = epochMillis(testDate, 23, 45)
+
+        val event = PlannerWidgetSync.buildSnapshot(
+            listOf(occurrence(schedule(id = "open-ended", title = "Open Ended", startAt = startAt, endAt = null))),
         ).getJSONObject("manualEventsByDate")
             .getJSONArray(testDate.toString())
             .getJSONObject(0)
