@@ -16,6 +16,7 @@ import com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus
 import com.lss.onmyplate.nativeplanner.domain.model.TimeConfidence
 import com.lss.onmyplate.nativeplanner.domain.model.toStoredValue
 import com.lss.onmyplate.nativeplanner.domain.parser.KoreanAppointmentParser
+import com.lss.onmyplate.nativeplanner.widget.PlannerWidgetSync
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -182,6 +183,7 @@ class PlannerRepository(
             throw error
         }
         refreshSchedules()
+        refreshCurrentWeekWidgetSnapshotFromCache()
         return savedRecord.schedule
     }
 
@@ -240,6 +242,7 @@ class PlannerRepository(
         rememberCandidate(titledCandidate.copy(status = CandidateStatus.Confirmed.dbValue))
         refreshPendingCandidates()
         refreshSchedules()
+        refreshCurrentWeekWidgetSnapshotFromCache()
         return@withLock if (scheduleStatus == ScheduleStatus.Uncertain) SaveResult.SavedAsUncertain(savedRecord.schedule) else SaveResult.Saved(savedRecord.schedule)
     }
 
@@ -277,6 +280,7 @@ class PlannerRepository(
         withContext(Dispatchers.IO) { client.patchSchedule(sessionToken(), updated, rule, exceptions) }
         refreshSchedule(scheduleId)
         refreshSchedules()
+        refreshCurrentWeekWidgetSnapshotFromCache()
         return true
     }
 
@@ -284,6 +288,7 @@ class PlannerRepository(
         withContext(Dispatchers.IO) { client.addRecurrenceException(sessionToken(), scheduleId, occurrenceStartAt) }
         refreshSchedule(scheduleId)
         refreshSchedules()
+        refreshCurrentWeekWidgetSnapshotFromCache()
     }
 
     suspend fun deleteSchedule(scheduleId: String) {
@@ -291,6 +296,7 @@ class PlannerRepository(
         scheduleRecords.value = scheduleRecords.value.filterNot { it.schedule.id == scheduleId }
         try {
             refreshSchedules()
+            refreshCurrentWeekWidgetSnapshotFromCache()
         } catch (error: Throwable) {
             Log.w(TAG, "deleteSchedule succeeded but refreshSchedules failed. scheduleId=$scheduleId", error)
         }
@@ -358,6 +364,17 @@ class PlannerRepository(
 
     private fun rememberCandidate(candidate: AppointmentCandidateEntity) {
         candidateRecords.value = candidateRecords.value + (candidate.id to candidate)
+    }
+
+    private fun refreshCurrentWeekWidgetSnapshotFromCache() {
+        val weekStart = java.time.LocalDate.now(scheduleZone)
+            .with(java.time.temporal.TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val rangeStart = weekStart.atStartOfDay(scheduleZone).toInstant().toEpochMilli()
+        val rangeEnd = weekStart.plusDays(7).atStartOfDay(scheduleZone).toInstant().toEpochMilli()
+        PlannerWidgetSync.saveSnapshot(
+            appContext,
+            expandScheduleOccurrences(scheduleRecords.value, rangeStart, rangeEnd),
+        )
     }
 
     private fun beginRuntimeLoading() {
