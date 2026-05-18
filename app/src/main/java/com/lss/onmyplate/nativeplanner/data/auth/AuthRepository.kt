@@ -3,13 +3,10 @@ package com.lss.onmyplate.nativeplanner.data.auth
 import android.content.Context
 import android.util.Log
 import com.lss.onmyplate.nativeplanner.BuildConfig
+import com.lss.onmyplate.nativeplanner.data.api.PlannerHttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
 
 class AuthRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -78,10 +75,13 @@ data class AuthSessionDebugState(
         "AuthSessionDebugState(prefsName=$prefsName, tokenKey=$tokenKey, apiConfigured=$apiConfigured, hasToken=$hasToken, tokenLength=$tokenLength)"
 }
 
-private class PlannerAuthApiClient(private val rawBaseUrl: String) {
-    private val baseUrl = rawBaseUrl.trim().trimEnd('/')
+private class PlannerAuthApiClient(rawBaseUrl: String) {
+    private val http = PlannerHttpClient(
+        rawBaseUrl = rawBaseUrl,
+        notConfiguredMessage = "약속 바구니 API가 설정되지 않았습니다.",
+    )
 
-    fun isConfigured(): Boolean = baseUrl.isNotBlank()
+    fun isConfigured(): Boolean = http.isConfigured()
 
     fun authenticate(path: String, identifier: String, password: String): AuthSession {
         require(identifier.isNotBlank()) { "아이디를 입력하세요." }
@@ -89,7 +89,7 @@ private class PlannerAuthApiClient(private val rawBaseUrl: String) {
         val body = JSONObject()
             .put("id", identifier)
             .put("password", password)
-        val json = JSONObject(request("POST", path, body))
+        val json = JSONObject(http.request("POST", path, body = body))
         val token = json.optNullableString("sessionToken", "session_token", "token")
             ?: error("인증 응답에 sessionToken이 없습니다.")
         return AuthSession(
@@ -105,37 +105,7 @@ private class PlannerAuthApiClient(private val rawBaseUrl: String) {
         val body = JSONObject()
             .put("currentPassword", currentPassword)
             .put("newPassword", newPassword)
-        request("POST", "/api/auth/password", body, sessionToken)
-    }
-
-    private fun request(method: String, path: String, body: JSONObject, bearerToken: String? = null): String {
-        require(isConfigured()) { "약속 바구니 API가 설정되지 않았습니다." }
-        val connection = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 15000
-            readTimeout = 15000
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Accept", "application/json")
-            if (!bearerToken.isNullOrBlank()) {
-                setRequestProperty("Authorization", "Bearer $bearerToken")
-            }
-            doOutput = true
-            outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-        }
-        val code = connection.responseCode
-        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-        val text = stream?.use { input -> BufferedReader(InputStreamReader(input)).readText() }.orEmpty()
-        if (code !in 200..299) error(errorMessage(code, text))
-        return text.ifBlank { "{}" }
-    }
-
-    private fun errorMessage(code: Int, text: String): String {
-        val apiMessage = runCatching {
-            val json = JSONObject(text)
-            json.optString("message").takeIf { it.isNotBlank() }
-                ?: json.optString("error").takeIf { it.isNotBlank() }
-        }.getOrNull()
-        return apiMessage ?: "인증 요청에 실패했습니다. ($code)"
+        http.request("POST", "/api/auth/password", token = sessionToken, body = body)
     }
 
     private fun JSONObject.optNullableString(vararg names: String): String? {

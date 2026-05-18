@@ -2,13 +2,10 @@ package com.lss.onmyplate.nativeplanner.data.supabase
 
 import android.content.Context
 import com.lss.onmyplate.nativeplanner.BuildConfig
+import com.lss.onmyplate.nativeplanner.data.api.PlannerHttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
 
 class FeedbackRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -34,10 +31,13 @@ class FeedbackRepository(context: Context) {
             ?.takeIf { it.isNotBlank() }
 }
 
-private class PlannerFeedbackApiClient(private val rawBaseUrl: String) {
-    private val baseUrl = rawBaseUrl.trim().trimEnd('/')
+private class PlannerFeedbackApiClient(rawBaseUrl: String) {
+    private val http = PlannerHttpClient(
+        rawBaseUrl = rawBaseUrl,
+        notConfiguredMessage = "Feedback API is not configured.",
+    )
 
-    fun isConfigured(): Boolean = baseUrl.isNotBlank()
+    fun isConfigured(): Boolean = http.isConfigured()
 
     fun submitFeedback(token: String?, message: String, sourceScreen: String) {
         val body = JSONObject()
@@ -45,38 +45,6 @@ private class PlannerFeedbackApiClient(private val rawBaseUrl: String) {
             .put("sourceScreen", sourceScreen)
             .put("appVersionName", BuildConfig.VERSION_NAME)
             .put("appVersionCode", BuildConfig.VERSION_CODE)
-        request("POST", "/api/planner/feedback", token, body)
-    }
-
-    private fun request(method: String, path: String, token: String?, body: JSONObject?): String {
-        require(isConfigured()) { "Feedback API is not configured." }
-        val connection = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 15000
-            readTimeout = 15000
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Accept", "application/json")
-            if (!token.isNullOrBlank()) {
-                setRequestProperty("Authorization", "Bearer $token")
-            }
-            if (body != null) {
-                doOutput = true
-                outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-            }
-        }
-        val code = connection.responseCode
-        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-        val text = stream?.use { input -> BufferedReader(InputStreamReader(input)).readText() }.orEmpty()
-        if (code !in 200..299) error(errorMessage(code, text))
-        return text.ifBlank { "{}" }
-    }
-
-    private fun errorMessage(code: Int, text: String): String {
-        val apiMessage = runCatching {
-            val json = JSONObject(text)
-            json.optString("message").takeIf { it.isNotBlank() }
-                ?: json.optString("error").takeIf { it.isNotBlank() }
-        }.getOrNull()
-        return apiMessage ?: "Feedback API request failed ($code)"
+        http.request("POST", "/api/planner/feedback", token = token, body = body)
     }
 }

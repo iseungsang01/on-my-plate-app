@@ -3,6 +3,7 @@ package com.lss.onmyplate.nativeplanner.data.repository
 import android.content.Context
 import android.util.Log
 import com.lss.onmyplate.nativeplanner.BuildConfig
+import com.lss.onmyplate.nativeplanner.data.api.PlannerHttpClient
 import com.lss.onmyplate.nativeplanner.data.entity.AppointmentCandidateEntity
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceExceptionEntity
@@ -29,10 +30,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.time.DayOfWeek
 import java.time.Instant
@@ -645,12 +642,16 @@ private fun mergeScheduleRecords(existing: List<ScheduleRecord>, updates: List<S
 }
 
 private class PlannerApiClient(
-    private val rawBaseUrl: String,
-    private val onUnauthorized: () -> Unit,
+    rawBaseUrl: String,
+    onUnauthorized: () -> Unit,
 ) {
-    private val baseUrl = rawBaseUrl.trim().trimEnd('/')
+    private val http = PlannerHttpClient(
+        rawBaseUrl = rawBaseUrl,
+        notConfiguredMessage = "Planner API is not configured.",
+        onUnauthorized = onUnauthorized,
+    )
 
-    fun isConfigured(): Boolean = baseUrl.isNotBlank()
+    fun isConfigured(): Boolean = http.isConfigured()
 
     fun listSchedules(token: String, rangeStart: Long?, rangeEnd: Long?): List<ScheduleRecord> {
         val query = buildList {
@@ -740,39 +741,16 @@ private class PlannerApiClient(
     }
 
     private fun request(method: String, path: String, token: String, body: JSONObject?): String {
-        require(isConfigured()) { "Planner API is not configured." }
         Log.i(TAG, "Planner API request started. method=$method, path=$path, tokenLength=${token.length}, hasBody=${body != null}")
-        try {
-            val connection = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
-                requestMethod = method
-                connectTimeout = 15000
-                readTimeout = 15000
-                setRequestProperty("Authorization", "Bearer $token")
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Accept", "application/json")
-                if (body != null) {
-                    doOutput = true
-                    outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                }
-            }
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.use { input -> BufferedReader(InputStreamReader(input)).readText() }.orEmpty()
-            if (code !in 200..299) {
-                if (code == HttpURLConnection.HTTP_UNAUTHORIZED) onUnauthorized()
-                Log.e(
-                    TAG,
-                    "Planner API request failed. method=$method, path=$path, status=$code, error=${apiErrorMessage(code, text)}, responseLength=${text.length}, responseSnippet=${text.safeSnippet()}",
-                )
-                error(apiErrorMessage(code, text))
-            }
-            Log.i(TAG, "Planner API request succeeded. method=$method, path=$path, status=$code, responseLength=${text.length}")
-            return text.ifBlank {
-                Log.w(TAG, "Planner API returned an empty body. method=$method, path=$path")
-                "{}"
-            }
+        return try {
+            val text = http.request(method, path, token = token, body = body)
+            Log.i(TAG, "Planner API request succeeded. method=$method, path=$path, responseLength=${text.length}")
+            text
         } catch (error: java.io.IOException) {
             Log.e(TAG, "Planner API request threw before a usable response. method=$method, path=$path, tokenLength=${token.length}", error)
+            throw error
+        } catch (error: Throwable) {
+            Log.e(TAG, "Planner API request failed. method=$method, path=$path, message=${error.message?.safeSnippet()}", error)
             throw error
         }
     }

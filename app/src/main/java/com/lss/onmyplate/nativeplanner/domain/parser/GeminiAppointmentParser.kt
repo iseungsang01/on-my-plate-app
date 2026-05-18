@@ -1,14 +1,11 @@
 package com.lss.onmyplate.nativeplanner.domain.parser
 
 import com.lss.onmyplate.nativeplanner.domain.model.AppointmentParseResult
+import com.lss.onmyplate.nativeplanner.data.api.PlannerHttpClient
 import com.lss.onmyplate.nativeplanner.domain.model.TimeConfidence
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
 import java.time.ZoneId
 
 class GeminiAppointmentParser(
@@ -43,30 +40,19 @@ class GeminiAppointmentParser(
     }
 
     private fun post(baseUrl: String, token: String, rawText: String, receivedAt: Long): String {
-        val endpoint = "$baseUrl/api/parser/appointment"
-        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 10_000
-            readTimeout = 25_000
-            doOutput = true
-            setRequestProperty("Authorization", "Bearer $token")
-            setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            setRequestProperty("Accept", "application/json")
-        }
-
         val payload = JSONObject()
             .put("rawText", rawText)
             .put("receivedAt", receivedAt)
-            .toString()
 
-        connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
-
-        val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
-        val body = stream?.use { input -> BufferedReader(InputStreamReader(input)).readText() }.orEmpty()
-        if (connection.responseCode !in 200..299) {
-            error("Gemini proxy parse failed: ${connection.responseCode} $body")
-        }
-        return body
+        return PlannerHttpClient(
+            rawBaseUrl = baseUrl,
+            notConfiguredMessage = "Gemini proxy parser API is not configured.",
+        ).request(
+            method = "POST",
+            path = "/api/parser/appointment",
+            token = token,
+            body = payload,
+        )
     }
 
     private fun parseProxyResponse(responseText: String): AppointmentParseResult? {

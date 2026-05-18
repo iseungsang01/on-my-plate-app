@@ -2,6 +2,7 @@
 
 import android.content.Context
 import com.lss.onmyplate.nativeplanner.BuildConfig
+import com.lss.onmyplate.nativeplanner.data.api.PlannerHttpClient
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleEntity
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceExceptionEntity
 import com.lss.onmyplate.nativeplanner.data.entity.ScheduleRecurrenceRuleEntity
@@ -9,10 +10,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.time.Instant
 
@@ -98,10 +95,13 @@ data class SharedScheduleRecurrenceException(
     val action: String,
 )
 
-private class PlannerShareApiClient(private val rawBaseUrl: String) {
-    private val baseUrl = rawBaseUrl.trim().trimEnd('/')
+private class PlannerShareApiClient(rawBaseUrl: String) {
+    private val http = PlannerHttpClient(
+        rawBaseUrl = rawBaseUrl,
+        notConfiguredMessage = "Planner share API is not configured.",
+    )
 
-    fun isConfigured(): Boolean = baseUrl.isNotBlank()
+    fun isConfigured(): Boolean = http.isConfigured()
 
     fun profile(token: String): ShareProfile {
         val json = JSONObject(request("POST", "/api/planner/share/profile", token, JSONObject()))
@@ -167,42 +167,11 @@ private class PlannerShareApiClient(private val rawBaseUrl: String) {
             },
         )
 
-    private fun request(method: String, path: String, token: String, body: JSONObject?): String {
-        require(isConfigured()) { "Planner share API is not configured." }
-        val connection = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 15000
-            readTimeout = 15000
-            setRequestProperty("Authorization", "Bearer $token")
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Accept", "application/json")
-            if (body != null) {
-                doOutput = true
-                outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-            }
-        }
-        val code = connection.responseCode
-        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-        val text = stream?.use { input -> BufferedReader(InputStreamReader(input)).readText() }.orEmpty()
-        if (code !in 200..299) error(errorMessage(code, text))
-        return text.ifBlank { "{}" }
-    }
-
-    private fun errorMessage(code: Int, text: String): String {
-        val apiMessage = runCatching {
-            val json = JSONObject(text)
-            json.optString("message").takeIf { it.isNotBlank() }
-                ?: json.optString("error").takeIf { it.isNotBlank() }
-        }.getOrNull()
-        return apiMessage ?: "Planner share API request failed ($code)"
-    }
+    private fun request(method: String, path: String, token: String, body: JSONObject?): String =
+        http.request(method, path, token = token, body = body)
 
     private fun parseArrayEnvelope(text: String, key: String): List<JSONObject> {
-        val trimmed = text.trim()
-        val array = if (trimmed.startsWith("[")) JSONArray(trimmed) else JSONObject(trimmed).optJSONArray(key) ?: JSONArray()
-        return buildList {
-            for (i in 0 until array.length()) add(array.getJSONObject(i))
-        }
+        return http.parseArrayEnvelope(text, key)
     }
 
     private fun JSONObject.toShareProfile(): ShareProfile = ShareProfile(
