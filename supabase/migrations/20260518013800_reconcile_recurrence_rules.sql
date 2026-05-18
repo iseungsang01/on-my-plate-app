@@ -1,12 +1,7 @@
--- Reference-only SQL.
---
--- This file is NOT the canonical remote migration source.
--- Remote database changes must be applied through Supabase CLI migration files under:
---   supabase/migrations/
---
--- For this recurrence reconciliation, use:
---   supabase/migrations/20260518013800_reconcile_recurrence_rules.sql
---
+-- Migration: reconcile recurrence rules with Android/API support.
+-- Source reference: docs/supabaseRecurrenceMigration.sql
+-- Apply with Supabase CLI, not manually through SQL Editor.
+
 -- P1-3 recurrence schema reconciliation.
 --
 -- Purpose:

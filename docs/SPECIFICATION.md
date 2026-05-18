@@ -512,6 +512,15 @@ Required refresh policy for the MVP:
 
 - Should verify widget snapshot generation from schedule occurrences and stale-snapshot preservation behavior.
 
+
+## Supabase Migration Policy
+
+Remote database schema changes must be managed through Supabase CLI migration files under `supabase/migrations/`.
+
+Do not document a schema change as SQL Editor-only work. SQL snippets or files under `docs/` are reference material; the canonical migration source is the timestamped SQL file under `supabase/migrations/` and the expected apply command is `supabase db push`.
+
+See `docs/SUPABASE_MIGRATION_POLICY.md` for the full policy.
+
 ## Release Checklist
 
 Before internal testing or production release:
