@@ -772,6 +772,12 @@
 - `uploadSharedSchedule(userId, groupId, request)` / `listSharedSchedules(userId, groupId, includeDummy)`
   - 그룹 멤버 권한을 확인한 뒤 공유 일정과 반복 규칙/예외 업로드 및 조회를 처리합니다.
 
+- `createAvailabilityGroup(userId, request)` / `joinAvailabilityGroup(userId, request)`
+  - Creates a P0 availability group or joins one by share code. Creation uses a database RPC so the group row and owner membership row are written in one transaction, and P0 accepts only `busy_only` visibility with `everyone` suggestion mode.
+
+- `getAvailabilityGroup(userId, groupId)` / `getAvailability(userId, groupId)`
+  - Requires availability group membership before returning metadata or slot counts. Responses expose aggregate member metadata and `availableCount`/`unavailableCount`/`totalCount` only; they do not return personal schedule titles, memos, locations, source fields, unavailable reasons, or other members' raw login ids.
+
 - `uploadPersonalSchedule(userId, request)`
   - 로그인 사용자의 개인 일정 row를 생성/upsert하고 반복 규칙/예외를 개인 일정 반복 테이블에 저장한 뒤 schedule JSON을 반환합니다.
 
@@ -866,3 +872,52 @@
   - Verifies that release signing and Play publishing variables are present before running the upload.
   - Runs `gradlew.bat :app:publishAab --no-daemon` on Windows, which builds the signed release AAB and uploads it to the configured Google Play track.
   - Prints the expected release AAB path after a successful publish.
+
+
+---
+
+## Availability Group Sharing API
+
+### `supabase/functions/planner-api/availability_groups.ts`
+
+- `createAvailabilityGroup(userId, request)`
+  - Creates a busy-only availability group with an owner membership in the same database RPC and returns the share code only to the creator.
+
+- `joinAvailabilityGroup(userId, request)`
+  - Joins an active group by share code, rejects duplicate membership, and returns only the caller-safe membership summary.
+
+- `getAvailabilityGroup(userId, groupId)`
+  - Requires group membership and returns group metadata plus aggregate member counts without exposing raw member user IDs. The metadata includes the group's server-owned `visibilityMode`, limited `visibilitySettings`, and `suggestionMode`.
+
+- `updateAvailabilityGroupSettings(userId, groupId, request)`
+  - Requires the active group owner and updates the availability group's suggestion mode or limited visibility settings. The default remains `busy_only`, and expanded visibility is constrained to a non-schedule-detail policy skeleton.
+
+- `assignAvailabilityGroupLeader(userId, groupId, memberId)` / `unassignAvailabilityGroupLeader(userId, groupId, memberId)`
+  - Requires the active group owner, changes a non-owner member between `member` and `leader`, and refuses to modify the owner's role.
+
+- `getAvailability(userId, groupId)`
+  - Requires group membership and returns busy-only slot counts: start/end, available count, unavailable count, total count, and rank score. It includes personal schedules and group-scoped dummy schedules in busy math without returning schedule title, memo, location, source, reason, dummy-vs-real source, or raw member IDs.
+
+- `listAvailabilityGroupDummySchedules(userId, groupId)`
+  - Requires group membership and lists only the caller's dummy schedules for that group, including the caller's private note.
+
+- `createAvailabilityGroupDummySchedule(userId, groupId, request)`
+  - Requires active group membership and creates a group-scoped dummy busy block owned by the caller. The private note is stored for the caller and is not serialized to other members.
+
+- `deleteAvailabilityGroupDummySchedule(userId, groupId, dummyScheduleId)`
+  - Requires group membership and deletes only the caller's own dummy schedule in that group.
+
+- `listAvailabilityGroupProposals(userId, groupId)`
+  - Requires group membership and returns proposals with busy-only availability snapshots, response counts, and only the caller's own response detail.
+
+- `createAvailabilityGroupProposal(userId, groupId, request)`
+  - Requires active group membership and passes the group's server-side suggestion-mode gate. It snapshots available/unavailable/total counts for the proposed time range using the current visibility policy, creates the proposal, and creates pending responses for all current members.
+
+- `respondToAvailabilityGroupProposal(userId, groupId, proposalId, request)`
+  - Requires group membership and updates only the caller's response to `accepted` or `rejected` while the proposal is pending.
+
+- `finalizeAvailabilityGroupProposal(userId, groupId, proposalId)`
+  - Requires the active group owner and finalizes a pending proposal by creating confirmed personal schedules only for accepted members. The created schedule title is exactly the proposal title.
+
+- `listAvailabilityGroupProposalComments(userId, groupId, proposalId)` / `createAvailabilityGroupProposalComment(userId, groupId, proposalId, request)`
+  - Requires group membership plus participation in the proposal response set before reading or writing comments. Comment responses include the body and caller-relative author flag without raw user IDs or member IDs.

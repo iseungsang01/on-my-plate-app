@@ -15,6 +15,24 @@ import {
 import { createCandidate, discardCandidate, getCandidate, listCandidates, updateCandidate } from "./candidates.ts";
 import { createGroup, listGroups, listSharedSchedules, profile, uploadSharedSchedule } from "./sharing.ts";
 import { submitFeedback } from "./feedback.ts";
+import {
+  assignAvailabilityGroupLeader,
+  createAvailabilityGroup,
+  createAvailabilityGroupDummySchedule,
+  createAvailabilityGroupProposal,
+  createAvailabilityGroupProposalComment,
+  deleteAvailabilityGroupDummySchedule,
+  finalizeAvailabilityGroupProposal,
+  getAvailability,
+  getAvailabilityGroup,
+  joinAvailabilityGroup,
+  listAvailabilityGroupDummySchedules,
+  listAvailabilityGroupProposalComments,
+  listAvailabilityGroupProposals,
+  respondToAvailabilityGroupProposal,
+  unassignAvailabilityGroupLeader,
+  updateAvailabilityGroupSettings,
+} from "./availability_groups.ts";
 
 const FUNCTION_NAME = "planner-api";
 
@@ -48,6 +66,89 @@ Deno.serve(async (request) => {
       const userId = await requireUserId(request);
       if (method === "GET") return await listGroups(userId);
       if (method === "POST") return await createGroup(userId, request);
+    }
+
+    if (path === "/api/planner/availability-groups") {
+      const userId = await requireUserId(request);
+      if (method === "POST") return await createAvailabilityGroup(userId, request);
+    }
+
+    if (path === "/api/planner/availability-groups/join") {
+      const userId = await requireUserId(request);
+      if (method === "POST") return await joinAvailabilityGroup(userId, request);
+    }
+
+    const availabilityGroupMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)$/);
+    if (availabilityGroupMatch) {
+      const userId = await requireUserId(request);
+      const groupId = decodeURIComponent(availabilityGroupMatch[1]);
+      if (method === "GET") return await getAvailabilityGroup(userId, groupId);
+      if (method === "PATCH") return await updateAvailabilityGroupSettings(userId, groupId, request);
+    }
+
+    const availabilityMemberLeaderMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)\/members\/([^/]+)\/leader$/);
+    if (availabilityMemberLeaderMatch) {
+      const userId = await requireUserId(request);
+      const groupId = decodeURIComponent(availabilityMemberLeaderMatch[1]);
+      const memberId = decodeURIComponent(availabilityMemberLeaderMatch[2]);
+      if (method === "POST") return await assignAvailabilityGroupLeader(userId, groupId, memberId);
+      if (method === "DELETE") return await unassignAvailabilityGroupLeader(userId, groupId, memberId);
+    }
+
+    const availabilityMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)\/availability$/);
+    if (availabilityMatch) {
+      const userId = await requireUserId(request);
+      const groupId = decodeURIComponent(availabilityMatch[1]);
+      if (method === "GET") return await getAvailability(userId, groupId);
+    }
+
+    const availabilityDummyMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)\/dummy-schedules$/);
+    if (availabilityDummyMatch) {
+      const userId = await requireUserId(request);
+      const groupId = decodeURIComponent(availabilityDummyMatch[1]);
+      if (method === "GET") return await listAvailabilityGroupDummySchedules(userId, groupId);
+      if (method === "POST") return await createAvailabilityGroupDummySchedule(userId, groupId, request);
+    }
+
+    const availabilityDummyItemMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)\/dummy-schedules\/([^/]+)$/);
+    if (availabilityDummyItemMatch) {
+      const userId = await requireUserId(request);
+      const groupId = decodeURIComponent(availabilityDummyItemMatch[1]);
+      const dummyScheduleId = decodeURIComponent(availabilityDummyItemMatch[2]);
+      if (method === "DELETE") return await deleteAvailabilityGroupDummySchedule(userId, groupId, dummyScheduleId);
+    }
+
+    const availabilityProposalsMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)\/proposals$/);
+    if (availabilityProposalsMatch) {
+      const userId = await requireUserId(request);
+      const groupId = decodeURIComponent(availabilityProposalsMatch[1]);
+      if (method === "GET") return await listAvailabilityGroupProposals(userId, groupId);
+      if (method === "POST") return await createAvailabilityGroupProposal(userId, groupId, request);
+    }
+
+    const availabilityProposalResponseMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)\/proposals\/([^/]+)\/response$/);
+    if (availabilityProposalResponseMatch) {
+      const userId = await requireUserId(request);
+      const groupId = decodeURIComponent(availabilityProposalResponseMatch[1]);
+      const proposalId = decodeURIComponent(availabilityProposalResponseMatch[2]);
+      if (method === "POST" || method === "PATCH") return await respondToAvailabilityGroupProposal(userId, groupId, proposalId, request);
+    }
+
+    const availabilityProposalCommentsMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)\/proposals\/([^/]+)\/comments$/);
+    if (availabilityProposalCommentsMatch) {
+      const userId = await requireUserId(request);
+      const groupId = decodeURIComponent(availabilityProposalCommentsMatch[1]);
+      const proposalId = decodeURIComponent(availabilityProposalCommentsMatch[2]);
+      if (method === "GET") return await listAvailabilityGroupProposalComments(userId, groupId, proposalId);
+      if (method === "POST") return await createAvailabilityGroupProposalComment(userId, groupId, proposalId, request);
+    }
+
+    const availabilityProposalFinalizeMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)\/proposals\/([^/]+)\/finalize$/);
+    if (availabilityProposalFinalizeMatch) {
+      const userId = await requireUserId(request);
+      const groupId = decodeURIComponent(availabilityProposalFinalizeMatch[1]);
+      const proposalId = decodeURIComponent(availabilityProposalFinalizeMatch[2]);
+      if (method === "POST") return await finalizeAvailabilityGroupProposal(userId, groupId, proposalId);
     }
 
     const groupSchedulesMatch = path.match(/^\/api\/planner\/share\/groups\/([^/]+)\/schedules$/);
