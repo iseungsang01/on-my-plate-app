@@ -111,6 +111,7 @@ type BusyBlock = { userId: string; startsAt: Date; endsAt: Date };
 type MemberRole = "owner" | "leader" | "member";
 type SuggestionMode = "everyone" | "owner_leader" | "owner_only";
 type VisibilityMode = "busy_only" | "expanded_limited";
+type AvailabilitySort = "time" | "rank";
 
 type SlotCount = {
   startsAt: string;
@@ -168,6 +169,40 @@ export async function createAvailabilityGroup(userId: string, request: Request):
   throw apiError(500, "Could not generate a unique share code.");
 }
 
+export async function listAvailabilityGroups(userId: string): Promise<Response> {
+  const { data: memberships, error: membershipError } = await db
+    .from("availability_group_members")
+    .select("id,group_id,user_id,role,joined_at")
+    .eq("user_id", userId)
+    .order("joined_at", { ascending: false });
+  if (membershipError) throw apiError(500, membershipError.message);
+
+  const memberRows = (memberships ?? []) as MemberRow[];
+  const groupIds = memberRows.map((member) => member.group_id);
+  if (groupIds.length === 0) return jsonResponse({ groups: [] });
+
+  const { data: groups, error: groupError } = await db
+    .from("availability_groups")
+    .select("*")
+    .in("id", groupIds)
+    .order("created_at", { ascending: false });
+  if (groupError) throw apiError(500, groupError.message);
+
+  const allMembersByGroup = await membersForGroups(groupIds);
+  const membershipByGroup = new Map(memberRows.map((member) => [member.group_id, member]));
+  return jsonResponse({
+    groups: ((groups ?? []) as GroupRow[]).map((group) => {
+      const members = allMembersByGroup.get(group.id) ?? [];
+      const membership = membershipByGroup.get(group.id) ?? null;
+      return {
+        group: toGroupJson(group, group.owner_id === userId),
+        membership: membership ? toMemberJson(membership, userId) : null,
+        members: toMembersSummary(members, userId),
+      };
+    }),
+  });
+}
+
 export async function joinAvailabilityGroup(userId: string, request: Request): Promise<Response> {
   const body = await readJson(request);
   const shareCode = requiredString(body.shareCode ?? body.share_code, "Share code is required.").trim().toUpperCase();
@@ -203,6 +238,14 @@ export async function getAvailabilityGroup(userId: string, groupId: string): Pro
     membership: membership ? toMemberJson(membership, userId) : null,
     members: toMembersSummary(members, userId),
   });
+}
+
+export async function listAvailabilityGroupMembers(userId: string, groupId: string): Promise<Response> {
+  const group = await requireGroup(userId, groupId);
+  assertGroupActive(group);
+  if (group.owner_id !== userId) throw apiError(403, "Only the group owner can list members.");
+  const members = await membersForGroup(groupId);
+  return jsonResponse({ members: members.map((member) => toMemberJson(member, userId)) });
 }
 
 export async function updateAvailabilityGroupSettings(userId: string, groupId: string, request: Request): Promise<Response> {
@@ -267,15 +310,17 @@ export async function unassignAvailabilityGroupLeader(userId: string, groupId: s
   return jsonResponse({ member: toMemberJson(data as MemberRow, userId) });
 }
 
-export async function getAvailability(userId: string, groupId: string): Promise<Response> {
+export async function getAvailability(userId: string, groupId: string, request: Request): Promise<Response> {
   const group = await requireGroup(userId, groupId);
   const members = await membersForGroup(groupId);
-  const slots = await calculateAvailability(group, members);
+  const sort = readAvailabilitySort(new URL(request.url).searchParams.get("sort"));
+  const slots = await calculateAvailability(group, members, sort);
   return jsonResponse({
     groupId: group.id,
     slotMinutes: group.slot_minutes,
     visibilityMode: "busy_only",
     recurrence: { included: true, timeZone: "Asia/Seoul" },
+    sort,
     totalMembers: members.length,
     slots,
   });
@@ -373,17 +418,9 @@ export async function createAvailabilityGroupProposal(userId: string, groupId: s
     .single();
   if (error) throw apiError(500, error.message);
 
-  const responseRows = members.map((member) => ({ proposal_id: proposal.id, member_id: member.id, user_id: member.user_id, response: "pending" }));
-  const { data: responses, error: responseError } = await db
-    .from("availability_group_proposal_responses")
-    .insert(responseRows)
-    .select("id,proposal_id,member_id,user_id,response,responded_at,created_at,updated_at");
-  if (responseError) {
-    await db.from("availability_group_proposals").delete().eq("id", proposal.id);
-    throw apiError(500, responseError.message);
-  }
+  const responses = (await proposalResponsesForGroup(groupId)).get(String(proposal.id)) ?? [];
 
-  return jsonResponse({ proposal: toProposalJson(proposal as ProposalRow, (responses ?? []) as ProposalResponseRow[], userId) }, 201);
+  return jsonResponse({ proposal: toProposalJson(proposal as ProposalRow, responses, userId) }, 201);
 }
 
 export async function respondToAvailabilityGroupProposal(userId: string, groupId: string, proposalId: string, request: Request): Promise<Response> {
@@ -456,7 +493,7 @@ export async function createAvailabilityGroupProposalComment(userId: string, gro
 }
 
 
-async function calculateAvailability(group: GroupRow, members: MemberRow[]): Promise<SlotCount[]> {
+async function calculateAvailability(group: GroupRow, members: MemberRow[], sort: AvailabilitySort): Promise<SlotCount[]> {
   const memberIds = members.map((member) => member.user_id);
   const busyBlocks = await busyBlocksForGroup(group, memberIds);
   const totalCount = members.length;
@@ -479,7 +516,12 @@ async function calculateAvailability(group: GroupRow, members: MemberRow[]): Pro
       rankScore: availableCount * 1000 + ownerTieBreak,
     });
   }
-  return slots.sort((left, right) => right.rankScore - left.rankScore || left.startsAt.localeCompare(right.startsAt));
+  return slots.sort((left, right) => sortAvailabilitySlots(left, right, sort));
+}
+
+function sortAvailabilitySlots(left: SlotCount, right: SlotCount, sort: AvailabilitySort): number {
+  if (sort === "rank") return right.rankScore - left.rankScore || left.startsAt.localeCompare(right.startsAt);
+  return left.startsAt.localeCompare(right.startsAt);
 }
 
 async function busyBlocksForGroup(group: GroupRow, memberIds: string[]): Promise<BusyBlock[]> {
@@ -723,6 +765,23 @@ async function membersForGroup(groupId: string): Promise<MemberRow[]> {
   return (data ?? []) as MemberRow[];
 }
 
+async function membersForGroups(groupIds: string[]): Promise<Map<string, MemberRow[]>> {
+  if (groupIds.length === 0) return new Map();
+  const { data, error } = await db
+    .from("availability_group_members")
+    .select("id,group_id,user_id,role,joined_at")
+    .in("group_id", groupIds)
+    .order("joined_at", { ascending: true });
+  if (error) throw apiError(500, error.message);
+  const grouped = new Map<string, MemberRow[]>();
+  for (const member of (data ?? []) as MemberRow[]) {
+    const existing = grouped.get(member.group_id) ?? [];
+    existing.push(member);
+    grouped.set(member.group_id, existing);
+  }
+  return grouped;
+}
+
 async function memberById(groupId: string, memberId: string): Promise<MemberRow> {
   const { data, error } = await db
     .from("availability_group_members")
@@ -933,6 +992,12 @@ function readSuggestionMode(value: unknown): SuggestionMode {
   const mode = optionalString(value) ?? "everyone";
   if (mode === "everyone" || mode === "owner_leader" || mode === "owner_only") return mode;
   throw apiError(400, "Suggestion mode must be everyone, owner_leader, or owner_only.");
+}
+
+function readAvailabilitySort(value: unknown): AvailabilitySort {
+  const sort = optionalString(value) ?? "time";
+  if (sort === "time" || sort === "rank") return sort;
+  throw apiError(400, "Availability sort must be time or rank.");
 }
 
 function readVisibilitySettings(value: unknown): JsonObject {

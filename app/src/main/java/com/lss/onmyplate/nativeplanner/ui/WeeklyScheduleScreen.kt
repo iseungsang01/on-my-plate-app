@@ -42,7 +42,11 @@ private const val timetableEndMinute = 24 * 60
 private const val defaultScheduleDurationMinutes = 60
 
 @Composable
-fun WeeklyScheduleScreen(repository: PlannerRepository, onOpenSchedule: (String, Long?) -> Unit) {
+fun WeeklyScheduleScreen(
+    repository: PlannerRepository,
+    onOpenSchedule: (String, Long?) -> Unit,
+    onOpenAvailabilityGroups: () -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     val today = remember { LocalDate.now(scheduleZone) }
     var weekOffset by remember { mutableStateOf(0) }
@@ -90,6 +94,12 @@ fun WeeklyScheduleScreen(repository: PlannerRepository, onOpenSchedule: (String,
             }
             if (runtimeState.loading && schedules.isEmpty()) {
                 LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 8.dp))
+            }
+            OutlinedButton(
+                onClick = onOpenAvailabilityGroups,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            ) {
+                Text("Coordinate availability with a group")
             }
             WeeklyTimetableWidget(
                 days = days,

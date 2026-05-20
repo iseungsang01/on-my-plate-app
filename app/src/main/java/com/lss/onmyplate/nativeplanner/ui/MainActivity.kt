@@ -235,6 +235,11 @@ sealed interface Route {
     data object Schedule : Route
     data object Basket : Route
     data object Sharing : Route
+    data object AvailabilityGroups : Route
+    data object AvailabilityGroupCreate : Route
+    data object AvailabilityGroupJoin : Route
+    data class AvailabilityGroupDetail(val groupId: String) : Route
+    data class AvailabilityProposalDetail(val groupId: String, val proposalId: String) : Route
     data object Settings : Route
     data object Login : Route
     data class ScheduleEdit(
@@ -261,9 +266,13 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () 
     when (route) {
         Route.Login -> LoginScreen(authRepository = app.authRepository, onAuthenticated = onAuthenticated)
         Route.Schedule -> MascotScaffold(selected = MainTab.Schedule, onRoute = onRoute) {
-            WeeklyScheduleScreen(repository = app.repository, onOpenSchedule = { scheduleId, occurrenceStartAt ->
-                onRoute(Route.ScheduleEdit(scheduleId, occurrenceStartAt, returnRoute = Route.Schedule))
-            })
+            WeeklyScheduleScreen(
+                repository = app.repository,
+                onOpenSchedule = { scheduleId, occurrenceStartAt ->
+                    onRoute(Route.ScheduleEdit(scheduleId, occurrenceStartAt, returnRoute = Route.Schedule))
+                },
+                onOpenAvailabilityGroups = { onRoute(Route.AvailabilityGroups) },
+            )
         }
         Route.Basket -> MascotScaffold(selected = MainTab.Basket, onRoute = onRoute) {
             BasketScreen(
@@ -290,6 +299,35 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () 
             plannerRepository = app.repository,
             sharingRepository = app.sharingRepository,
             onBack = { onRoute(Route.Schedule) },
+        )
+        Route.AvailabilityGroups -> AvailabilityGroupListScreen(
+            repository = app.availabilityGroupRepository,
+            onOpenGroup = { onRoute(Route.AvailabilityGroupDetail(it)) },
+            onCreate = { onRoute(Route.AvailabilityGroupCreate) },
+            onJoin = { onRoute(Route.AvailabilityGroupJoin) },
+            onBack = { onRoute(Route.Schedule) },
+        )
+        Route.AvailabilityGroupCreate -> AvailabilityGroupCreateScreen(
+            repository = app.availabilityGroupRepository,
+            onCreated = { onRoute(Route.AvailabilityGroupDetail(it)) },
+            onBack = { onRoute(Route.AvailabilityGroups) },
+        )
+        Route.AvailabilityGroupJoin -> AvailabilityGroupJoinScreen(
+            repository = app.availabilityGroupRepository,
+            onJoined = { onRoute(Route.AvailabilityGroupDetail(it)) },
+            onBack = { onRoute(Route.AvailabilityGroups) },
+        )
+        is Route.AvailabilityGroupDetail -> AvailabilityGroupDetailScreen(
+            repository = app.availabilityGroupRepository,
+            groupId = route.groupId,
+            onOpenProposal = { proposalId -> onRoute(Route.AvailabilityProposalDetail(route.groupId, proposalId)) },
+            onBack = { onRoute(Route.AvailabilityGroups) },
+        )
+        is Route.AvailabilityProposalDetail -> AvailabilityProposalDetailScreen(
+            repository = app.availabilityGroupRepository,
+            groupId = route.groupId,
+            proposalId = route.proposalId,
+            onBack = { onRoute(Route.AvailabilityGroupDetail(route.groupId)) },
         )
         Route.Settings -> MascotScaffold(selected = MainTab.Settings, onRoute = onRoute) {
             SettingsScreen(

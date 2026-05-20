@@ -772,11 +772,11 @@
 - `uploadSharedSchedule(userId, groupId, request)` / `listSharedSchedules(userId, groupId, includeDummy)`
   - 그룹 멤버 권한을 확인한 뒤 공유 일정과 반복 규칙/예외 업로드 및 조회를 처리합니다.
 
-- `createAvailabilityGroup(userId, request)` / `joinAvailabilityGroup(userId, request)`
-  - Creates a P0 availability group or joins one by share code. Creation uses a database RPC so the group row and owner membership row are written in one transaction, and P0 accepts only `busy_only` visibility with `everyone` suggestion mode.
+- `createAvailabilityGroup(userId, request)` / `joinAvailabilityGroup(userId, request)` / `listAvailabilityGroups(userId)`
+  - Creates a P0 availability group, joins one by share code, or lists only groups where the caller is already a member. Creation uses a database RPC so the group row and owner membership row are written in one transaction. Join rejects duplicate membership, backfills pending proposal response rows for proposals that existed before the join, and returns only the caller-safe membership summary.
 
-- `getAvailabilityGroup(userId, groupId)` / `getAvailability(userId, groupId)`
-  - Requires availability group membership before returning metadata or slot counts. Responses expose aggregate member metadata and `availableCount`/`unavailableCount`/`totalCount` only; they do not return personal schedule titles, memos, locations, source fields, unavailable reasons, or other members' raw login ids.
+- `getAvailabilityGroup(userId, groupId)` / `listAvailabilityGroupMembers(userId, groupId)` / `getAvailability(userId, groupId, request)`
+  - Requires availability group membership before returning metadata or slot counts. Member-list access is owner-only and returns only safe member ids, roles, caller-relative `isMe`, and join timestamps. Availability supports `sort=time|rank`, defaults to chronological `time`, and responses expose aggregate member metadata and `availableCount`/`unavailableCount`/`totalCount` only; they do not return personal schedule titles, memos, locations, source fields, unavailable reasons, or other members' raw login ids.
 
 - `uploadPersonalSchedule(userId, request)`
   - 로그인 사용자의 개인 일정 row를 생성/upsert하고 반복 규칙/예외를 개인 일정 반복 테이블에 저장한 뒤 schedule JSON을 반환합니다.
@@ -883,11 +883,17 @@
 - `createAvailabilityGroup(userId, request)`
   - Creates a busy-only availability group with an owner membership in the same database RPC and returns the share code only to the creator.
 
+- `listAvailabilityGroups(userId)`
+  - Lists availability groups where the caller has a membership, including safe group metadata, caller membership, and aggregate member summary. Share codes remain creator/owner-only.
+
 - `joinAvailabilityGroup(userId, request)`
-  - Joins an active group by share code, rejects duplicate membership, and returns only the caller-safe membership summary.
+  - Joins an active group by share code, rejects duplicate membership, backfills pending response rows for pending proposals created before the caller joined, and returns only the caller-safe membership summary.
 
 - `getAvailabilityGroup(userId, groupId)`
   - Requires group membership and returns group metadata plus aggregate member counts without exposing raw member user IDs. The metadata includes the group's server-owned `visibilityMode`, limited `visibilitySettings`, and `suggestionMode`.
+
+- `listAvailabilityGroupMembers(userId, groupId)`
+  - Requires the active group owner and returns the safe member-management list needed for leader assignment. Each member contains only member id, role, caller-relative `isMe`, and `joinedAt`; raw user ids are not serialized.
 
 - `updateAvailabilityGroupSettings(userId, groupId, request)`
   - Requires the active group owner and updates the availability group's suggestion mode or limited visibility settings. The default remains `busy_only`, and expanded visibility is constrained to a non-schedule-detail policy skeleton.
@@ -895,8 +901,8 @@
 - `assignAvailabilityGroupLeader(userId, groupId, memberId)` / `unassignAvailabilityGroupLeader(userId, groupId, memberId)`
   - Requires the active group owner, changes a non-owner member between `member` and `leader`, and refuses to modify the owner's role.
 
-- `getAvailability(userId, groupId)`
-  - Requires group membership and returns busy-only slot counts: start/end, available count, unavailable count, total count, and rank score. It includes personal schedules and group-scoped dummy schedules in busy math without returning schedule title, memo, location, source, reason, dummy-vs-real source, or raw member IDs.
+- `getAvailability(userId, groupId, request)`
+  - Requires group membership and returns busy-only slot counts: start/end, available count, unavailable count, total count, and rank score. The optional `sort` query accepts `time` for chronological order or `rank` for best-slot order, defaults to `time`, and rejects invalid values with 400. It includes personal schedules and group-scoped dummy schedules in busy math without returning schedule title, memo, location, source, reason, dummy-vs-real source, or raw member IDs.
 
 - `listAvailabilityGroupDummySchedules(userId, groupId)`
   - Requires group membership and lists only the caller's dummy schedules for that group, including the caller's private note.

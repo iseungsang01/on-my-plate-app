@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.lss.onmyplate.nativeplanner.BuildConfig
 import com.lss.onmyplate.nativeplanner.data.auth.AuthRepository
+import com.lss.onmyplate.nativeplanner.data.repository.AvailabilityGroupRepository
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.supabase.FeedbackRepository
 import com.lss.onmyplate.nativeplanner.data.supabase.SharingRepository
@@ -37,6 +38,7 @@ class OnMyPlateApp : Application() {
         )
     }
     val repository by lazy { PlannerRepository(this, parser) }
+    val availabilityGroupRepository by lazy { AvailabilityGroupRepository(this) }
     val authRepository by lazy { AuthRepository(this) }
     val feedbackRepository by lazy { FeedbackRepository(this) }
     val sharingRepository by lazy { SharingRepository(this) }

@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 API = ROOT / "supabase/functions/planner-api/availability_groups.ts"
 INDEX = ROOT / "supabase/functions/planner-api/index.ts"
-MIGRATION = ROOT / "supabase/migrations/20260518153220_availability_group_sharing.sql"
+MIGRATIONS = ROOT / "supabase/migrations"
 
 
 def fail(message: str) -> None:
@@ -43,7 +43,7 @@ def forbid_regex(text: str, pattern: str, label: str) -> None:
 def main() -> int:
     api = API.read_text(encoding="utf-8")
     index = INDEX.read_text(encoding="utf-8")
-    migration = MIGRATION.read_text(encoding="utf-8")
+    migration = "\n".join(path.read_text(encoding="utf-8") for path in sorted(MIGRATIONS.glob("*.sql")))
 
     # P0 privacy/static checks: availability response is aggregate-only.
     get_availability = re.search(r"export async function getAvailability\(.*?\n}\n", api, re.S)
@@ -59,8 +59,24 @@ def main() -> int:
             fail(f"availability response may expose forbidden field '{forbidden}'")
     for required in ["visibilityMode: \"busy_only\"", "totalMembers", "slots"]:
         require(availability_response, required, f"P0 aggregate availability field {required}")
+    require(availability_response, "sort", "availability sort echo")
+    require_regex(api, r"type AvailabilitySort = \"time\" \| \"rank\"", "availability sort type")
+    require_regex(api, r"function readAvailabilitySort[\s\S]*sort === \"time\" \|\| sort === \"rank\"[\s\S]*apiError\(400", "availability sort validation")
+    require_regex(api, r"readAvailabilitySort\(new URL\(request\.url\)\.searchParams\.get\(\"sort\"\)\)", "availability reads sort query")
+    require_regex(api, r"sort === \"rank\"[\s\S]*right\.rankScore - left\.rankScore[\s\S]*left\.startsAt\.localeCompare\(right\.startsAt\)", "rank sort policy")
+    require_regex(api, r"return left\.startsAt\.localeCompare\(right\.startsAt\)", "time sort policy")
     require_regex(api, r"createAvailabilityGroup[\s\S]*toGroupJson\(group as GroupRow, true\)", "creator-only share code response")
     require_regex(api, r"joinAvailabilityGroup[\s\S]*toGroupJson\(group as GroupRow, false\)", "join response excludes reusable share code")
+    require_regex(api, r"export async function listAvailabilityGroups[\s\S]*membershipForUser|export async function listAvailabilityGroups[\s\S]*availability_group_members", "list availability groups uses membership scope")
+    require_regex(index, r"path === \"\/api\/planner\/availability-groups\"[\s\S]*method === \"GET\"[\s\S]*listAvailabilityGroups", "list availability groups route")
+    require_regex(index, r"availability-groups\\/\(\[\^/\]\+\)\\/members", "safe members route")
+    require_regex(api, r"export async function listAvailabilityGroupMembers[\s\S]*assertGroupActive\(group\)[\s\S]*Only the group owner can list members[\s\S]*toMemberJson", "active owner-only safe members endpoint")
+    member_serializer = re.search(r"function toMemberJson[\s\S]*?return \{([\s\S]*?)\n  \};\n}", api)
+    if not member_serializer:
+        fail("member serializer not found")
+    for forbidden in ["userId:", "user_id:", "created_by:"]:
+        if forbidden in member_serializer.group(1):
+            fail(f"member serializer may expose forbidden field '{forbidden}'")
 
     # P1 contract: dummy schedules exist, are group/user scoped, and private note is conditional on author.
     require(migration, "create table if not exists public.availability_group_dummy_schedules", "dummy schedule table")
@@ -77,7 +93,10 @@ def main() -> int:
     require(migration, "snapshot_total_count integer not null", "proposal total snapshot")
     require(migration, "create table if not exists public.availability_group_proposal_responses", "proposal responses table")
     require_regex(api, r"availabilitySnapshot:[\s\S]*availableCount[\s\S]*unavailableCount[\s\S]*totalCount", "proposal busy-only snapshot response")
-    require_regex(api, r"members\.map\(\(member\) => \(\{ proposal_id: proposal\.id, member_id: member\.id, user_id: member\.user_id, response: \"pending\"", "pending responses for members")
+    require_regex(migration, r"create trigger availability_group_proposal_pending_responses[\s\S]*after insert on public\.availability_group_proposals", "proposal trigger creates pending responses for current members")
+    require_regex(migration, r"create trigger availability_group_member_pending_response_backfill[\s\S]*after insert on public\.availability_group_members", "member trigger backfills pending proposal responses")
+    require_regex(migration, r"backfill_availability_group_member_pending_responses[\s\S]*pg_advisory_xact_lock\(hashtextextended\(new\.group_id::text, 0\)\)[\s\S]*status = 'pending'[\s\S]*for update[\s\S]*on conflict \(proposal_id, member_id\) do nothing", "late join pending proposal response backfill is group-locked and idempotent")
+    require_regex(migration, r"create_availability_group_proposal_pending_responses[\s\S]*pg_advisory_xact_lock\(hashtextextended\(new\.group_id::text, 0\)\)[\s\S]*from public\.availability_group_members member[\s\S]*on conflict \(proposal_id, member_id\) do nothing", "proposal pending response backfill is group-locked and idempotent")
     require_regex(api, r"\.eq\(\"proposal_id\", proposalId\)[\s\S]*\.eq\(\"user_id\", userId\)", "members update only own response")
 
     # P1 finalize contract: owner-only and accepted-only real personal schedule creation with exact proposal title.

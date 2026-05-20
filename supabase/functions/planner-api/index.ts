@@ -26,9 +26,11 @@ import {
   getAvailability,
   getAvailabilityGroup,
   joinAvailabilityGroup,
+  listAvailabilityGroupMembers,
   listAvailabilityGroupDummySchedules,
   listAvailabilityGroupProposalComments,
   listAvailabilityGroupProposals,
+  listAvailabilityGroups,
   respondToAvailabilityGroupProposal,
   unassignAvailabilityGroupLeader,
   updateAvailabilityGroupSettings,
@@ -70,6 +72,7 @@ Deno.serve(async (request) => {
 
     if (path === "/api/planner/availability-groups") {
       const userId = await requireUserId(request);
+      if (method === "GET") return await listAvailabilityGroups(userId);
       if (method === "POST") return await createAvailabilityGroup(userId, request);
     }
 
@@ -95,11 +98,18 @@ Deno.serve(async (request) => {
       if (method === "DELETE") return await unassignAvailabilityGroupLeader(userId, groupId, memberId);
     }
 
+    const availabilityMembersMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)\/members$/);
+    if (availabilityMembersMatch) {
+      const userId = await requireUserId(request);
+      const groupId = decodeURIComponent(availabilityMembersMatch[1]);
+      if (method === "GET") return await listAvailabilityGroupMembers(userId, groupId);
+    }
+
     const availabilityMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)\/availability$/);
     if (availabilityMatch) {
       const userId = await requireUserId(request);
       const groupId = decodeURIComponent(availabilityMatch[1]);
-      if (method === "GET") return await getAvailability(userId, groupId);
+      if (method === "GET") return await getAvailability(userId, groupId, request);
     }
 
     const availabilityDummyMatch = path.match(/^\/api\/planner\/availability-groups\/([^/]+)\/dummy-schedules$/);
