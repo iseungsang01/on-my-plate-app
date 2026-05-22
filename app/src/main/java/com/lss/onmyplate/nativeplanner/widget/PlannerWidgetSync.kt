@@ -16,11 +16,18 @@ import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 
 object PlannerWidgetSync {
+    private const val SyncThrottleMillis = 45_000L
     private val zoneId: ZoneId = ZoneId.of("Asia/Seoul")
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var lastSyncStartedAt: Long = 0L
 
     fun syncFromPlannerApiSnapshot(context: Context) {
         val appContext = context.applicationContext
+        val now = System.currentTimeMillis()
+        if (now - lastSyncStartedAt < SyncThrottleMillis) {
+            return
+        }
+        lastSyncStartedAt = now
         syncScope.launch {
             val app = appContext as? OnMyPlateApp
             if (app == null) {

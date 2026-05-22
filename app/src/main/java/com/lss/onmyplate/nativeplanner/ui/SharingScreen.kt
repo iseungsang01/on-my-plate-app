@@ -23,7 +23,8 @@ import kotlinx.coroutines.launch
 fun SharingScreen(
     plannerRepository: PlannerRepository,
     sharingRepository: SharingRepository,
-    onBack: () -> Unit,
+    onOpenAvailabilityGroups: () -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     var publicId by remember { mutableStateOf(sharingRepository.cachedPublicId().orEmpty()) }
@@ -58,8 +59,8 @@ fun SharingScreen(
                 publicId = sharingRepository.ensureProfile().publicId
                 groups = sharingRepository.listGroups()
                 selectedGroup = selectedGroup?.let { selected -> groups.firstOrNull { it.id == selected.id } } ?: groups.firstOrNull()
+                if (selectedGroup == null) sharedSchedules = emptyList()
                 localSchedules = plannerRepository.getSchedules()
-                selectedGroup?.let { sharedSchedules = sharingRepository.listSharedSchedules(it.id, includeDummy) }
             } catch (t: Throwable) {
                 message = t.message ?: "공유 정보를 불러오지 못했습니다."
             } finally {
@@ -88,8 +89,19 @@ fun SharingScreen(
         ) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onBack) { Text("← 일정") }
+                    onBack?.let { back -> OutlinedButton(onClick = back) { Text("← 일정") } }
                     Text("공유 일정", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                }
+            }
+            item {
+                Card(colors = FeedLoopCardColors(), border = BorderStroke(1.dp, FeedLoopColors.Border)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("그룹 가용시간 조율", fontWeight = FontWeight.SemiBold)
+                        Text("공유 탭에서 그룹을 만들거나 참여하고, 멤버들의 가능한 시간을 비교합니다.", color = FeedLoopColors.Secondary)
+                        Button(onClick = onOpenAvailabilityGroups, modifier = Modifier.fillMaxWidth()) {
+                            Text("그룹 가용시간 조율")
+                        }
+                    }
                 }
             }
             item {

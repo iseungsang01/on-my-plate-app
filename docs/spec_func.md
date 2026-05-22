@@ -4,10 +4,10 @@
 
 ## 핵심 처리 흐름 요약
 
-1. `ShareReceiverActivity.onCreate` or `PlannerScreen` direct input receives shared/typed appointment text.
-2. The text creates a pending `AppointmentCandidateEntity` detail setup through `PlannerRepository.createCandidate`; it is not a final schedule yet.
-3. The user opens the detail setup from the notification or basket, edits title/time/location/recurrence, and confirms it.
-4. Confirmation calls `saveFromCandidate`, writes the final personal schedule through `/api/planner/schedules`, marks the candidate confirmed, and returns to the weekly timetable.
+1. `ShareReceiverActivity.onCreate` receives shared appointment text and keeps using the candidate/notification intake path.
+2. The navigator-centered `+` receives typed natural-language quick-add text, parses it, lets the user edit start/end/location inline, and saves a confirmed `ScheduleEntity` directly.
+3. Shared text creates a pending `AppointmentCandidateEntity` detail setup through `PlannerRepository.createCandidate`; it is not a final schedule yet.
+4. Candidate confirmation calls `saveFromCandidate`, writes the final personal schedule through `/api/planner/schedules`, marks the candidate confirmed, and returns to the weekly timetable.
 5. Saved `ScheduleEntity` records and recurrence data are observed by `observeExpandedSchedules` and synced to `PlannerWidgetSync.saveSnapshot`.
 
 ---
@@ -243,7 +243,8 @@
   - 원본 저장 일정 목록 `Flow`를 반환합니다.
 
 - `observeExpandedSchedules(rangeStart, rangeEnd)`
-  - 원본 저장 일정, 반복 규칙, 반복 예외를 함께 관찰하고 지정 범위 안의 `ScheduleOccurrence` 목록으로 펼쳐 반환합니다.
+  - Observes stored schedules, recurrence rules, and exceptions as expanded `ScheduleOccurrence` values for the requested range.
+  - Starts with a repository refresh, but repeated same-range refreshes may be served from the short TTL cache or coalesced with an in-flight request.
 
 - `observeSchedule(id)` / `getSchedule(id)`
   - 저장 일정 편집 화면에서 사용할 일정 1건을 관찰하거나 조회합니다.
@@ -252,19 +253,21 @@
   - 저장 일정에 연결된 반복 규칙 1건을 조회합니다.
 
 - `getExpandedSchedules(rangeStart, rangeEnd)`
-  - suspend 문맥에서 지정 범위 안의 단일/반복 occurrence 목록을 조회합니다.
+  - Returns single/recurring occurrences for the requested range from suspend callers.
+  - Uses the same short range-keyed schedule refresh cache unless the caller requests force freshness.
 
 - `observePendingCandidates()`
-  - 플래너 화면에 표시할 미처리 후보 목록 `Flow`를 반환합니다.
+  - Returns the pending candidate list `Flow` for basket/detail setup screens.
+  - Starts with a pending-candidate refresh that may use a short TTL or join an in-flight refresh to avoid repeated screen-entry calls.
 
 - `observeCandidate(id)`
-  - 후보 편집/충돌 화면에서 사용할 후보 1건 `Flow`를 반환합니다.
+  - Returns a candidate `Flow` for edit/conflict screens and uses the in-memory candidate cache before fetching the individual candidate.
 
-- `getCandidate(id)`
-  - 알림 처리 등 suspend 문맥에서 후보 1건을 직접 조회합니다.
+- `getCandidate(id, forceRefresh=false)`
+  - Returns one candidate for suspend callers. It is cache-first by default, while conflict-sensitive save/complete flows can request force freshness.
 
 - `createCandidate(rawText, sourceApp, receivedAt)`
-  - Preserves shared/direct input text as `rawText`.
+  - Preserves shared appointment text as `rawText` for the candidate/notification intake path.
   - Calls `KoreanAppointmentParser.parseWithOutcome` and stores parser-derived start/end/location plus stable parse provenance on the pending `AppointmentCandidateEntity`.
   - The candidate title remains blank until the user enters it in the notification or edit screen.
   - Never writes parser debug markers into `extractedLocation`; fallback/parser-error candidates keep the parsed location when present and otherwise store null.
@@ -275,9 +278,15 @@
   - Planner API save failures log the candidate payload shape and response snippet without logging the raw shared text body.
   - A 401 response clears the cached session token so stale local sessions from a reset/truncated backend require login again.
 - `createScheduleFromInput(rawText, sourceApp, receivedAt)`
-  - Legacy direct-save helper that creates a final personal schedule immediately; external share and basket input should prefer `createCandidate` so the user can configure details before confirmation.
-  - 파싱과 후보 생성을 건너뛰고 수신 시각부터 1시간짜리 `planned` 개인 일정을 만듭니다.
-  - `planner-api`의 `/api/planner/schedules`에 저장한 뒤 일정 목록을 새로고침합니다.
+  - Compatibility helper for direct typed schedule saves; it now parses the text and delegates to the confirmed quick-add save path instead of creating a `planned` placeholder.
+
+- `parseQuickAddInput(rawText, receivedAt)`
+  - Calls `KoreanAppointmentParser.parseWithOutcome` for navigator `+` quick-add and returns start/end/location parse metadata without creating a candidate or notification.
+
+- `createConfirmedScheduleFromQuickAdd(rawText, startAt, endAt, location, sourceApp)`
+  - Saves a confirmed personal schedule directly through `/api/planner/schedules` using the raw input as the title, edited start/end/location fields, `sourceText` as the raw input, and `sourceApp` as `quick_add` by default.
+  - Does not create, update, or remove pending candidates and does not trigger notification APIs.
+  - Merges the saved schedule into the repository cache, invalidates schedule refresh TTL state, and refreshes the current-week widget snapshot from cache.
 
 - `conflictsForCandidate(candidateId, titleOverride)`
   - 후보가 존재하지 않으면 `MissingCandidate`를 반환합니다.
@@ -436,10 +445,10 @@
   - 충돌 해결 화면으로 이동하는 deep link intent를 생성합니다.
 
 - `AppRoot(route, onRoute)`
-  - 하단 탭은 `일정`, `바구니`, `설정`만 표시해 MVP 화면 표면을 주간 일정 확인, 약속 저장, 설정으로 제한합니다.
-  - 현재 route에 따라 로그인, 주간 일정, 약속 바구니, 공유, 설정, 일정 편집, 후보 편집, 충돌 해결, 추가 완료 화면 중 하나를 표시합니다. 공유 화면 route와 구현은 유지하지만 하단 탭에서는 노출하지 않습니다.
-  - 메인 탭 route는 `MascotScaffold`로 감싸고, 후보 저장 완료 후에는 `Route.Complete(candidateId)`로 이동합니다.
-
+  - Shows bottom navigation tabs for Schedule, Basket, Sharing, and Settings, with a centered `+` quick-add action between the tab groups.
+  - The centered `+` opens a dimmed quick-add dialog with a focused one-line natural-language input, editable parsed start/end/location review, a primary confirm button, and a smaller cancel button.
+  - Displays login, weekly schedule, basket, sharing, group availability subroutes, settings, schedule edit, candidate edit, conflict, and completion screens according to the current route.
+  - Quick-add confirm calls `createConfirmedScheduleFromQuickAdd`; it bypasses pending candidates and notifications.
   - `Route.ScheduleEdit` preserves the caller as `returnRoute`; edit back/cancel/save/delete completion returns through that source route.
 
 ### `ui/LoginScreen.kt`
@@ -455,6 +464,7 @@
 - `WeeklyScheduleScreen(repository, onOpenSchedule)`
   - Shows the current Monday-to-Sunday schedule view as a full-screen timetable.
   - The top controls are compacted so the timetable body gets most of the available height.
+  - Group availability coordination is not launched from the schedule screen; users enter it from the Sharing tab.
 
 - `WeeklyTimetableWidget(days, schedulesByDay, onPreviousWeek, onNextWeek, onOpenSchedule, onMoveSchedule)`
   - Renders previous/date range/settings/edit/next controls on one compact row; settings opens a time-range dialog and edit mode enables drag-moving schedule blocks.
@@ -491,11 +501,10 @@
 ### `ui/PlannerScreen.kt`
 
 - `BasketScreen(repository, onOpenCandidate)`
-  - Shows the promise basket screen and explains that shared/typed appointments become detail setups before confirmation.
-  - Direct text input calls `createCandidate`, then opens the schedule detail setup screen for title/time/location confirmation.
-  - While direct text candidate creation is in flight, the input and create button are disabled and duplicate taps are ignored.
+  - Shows the promise basket screen for shared pending candidate setup/list and saved schedule checking.
+  - Does not include direct text/detail creation input; new typed schedule creation starts from the navigator centered `+` quick-add action.
   - Shows pending candidates under the schedule detail setup section; selecting one opens `CandidateEditScreen`.
-  - Shows final timetable records from `observeExpandedSchedules(rangeStart, rangeEnd)`.
+  - Shows final timetable records from `observeExpandedSchedules(rangeStart, rangeEnd)` only after the saved schedule section is expanded, avoiding a schedule fetch on initial basket entry.
 
 ### `ui/ScheduleEditScreen.kt`
 
@@ -518,10 +527,11 @@
 
 ### `ui/SharingScreen.kt`
 
-- `SharingScreen(plannerRepository, sharingRepository, onBack)`
+- `SharingScreen(plannerRepository, sharingRepository, onOpenAvailabilityGroups, onBack)`
   - Loads or creates the current user's sharing ID through the external share API, and creates groups with a partner sharing ID.
+  - Provides a Sharing-tab entry point into group availability coordination.
   - Displays the signed-in user's personal Supabase schedules and uploads only the schedule selected by the user with its recurrence rule/exceptions.
-  - Displays real shared schedules for the selected group, optionally including dummy schedules returned by the API.
+  - Displays real shared schedules for the selected group, optionally including dummy schedules returned by the API; the initial screen refresh selects the group and lets the selected-group effect load shared schedules once.
   - Shows a setup/login error when the share API base URL or existing app session token is missing.
   - Provides a checkbox for including dummy schedules.
 
@@ -616,9 +626,9 @@
 
 ### `widget/PlannerWidgetSync.kt`
 
-- `syncFromPlannerDatabase(context)`
+- `syncFromPlannerApiSnapshot(context)`
   - 앱 context가 `OnMyPlateApp`이 아니면 기존 위젯 snapshot을 지우지 않고 동기화를 중단합니다.
-  - 앱 context가 `OnMyPlateApp`이고 로그인 세션이 있으면 Supabase 개인 일정 API에서 현재 주 범위의 단일/반복 occurrence를 조회합니다.
+  - When the context is `OnMyPlateApp` and a login session exists, fetches current-week expanded schedules through `PlannerRepository.getExpandedSchedules`. Repeated background sync attempts inside the throttle window are skipped.
   - 세션이 없거나 API 조회에 실패하면 빈 snapshot을 저장합니다.
   - 조회 결과로 `saveSnapshot`을 호출합니다.
 

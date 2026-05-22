@@ -8,6 +8,7 @@ import java.time.ZoneId
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KoreanAppointmentParserTest {
@@ -204,6 +205,33 @@ class KoreanAppointmentParserTest {
         assertEquals("카페", result.location)
     }
 
+
+    @Test
+    fun localFirstParserSkipsLlmForSlashDateAndTimeOnlyConfidence() = runBlocking {
+        var llmCalls = 0
+        val parser = KoreanAppointmentParser(
+            zoneId = zoneId,
+            llmParser = AppointmentLlmParser { _, _ ->
+                llmCalls += 1
+                AppointmentParseResult(
+                    title = "LLM should not be used",
+                    startAt = null,
+                    endAt = null,
+                    location = null,
+                    confidence = 0.1f,
+                    timeConfidence = TimeConfidence.Low,
+                )
+            },
+            preferLlm = false,
+        )
+
+        val outcome = parser.parseWithOutcome("5/17 14:00", receivedAt)
+
+        assertEquals(AppointmentParseSource.LocalOnly, outcome.source)
+        assertEquals(epochMillis(2026, 5, 17, 14, 0), outcome.result.startAt)
+        assertTrue(outcome.result.confidence >= 0.66f)
+        assertEquals(0, llmCalls)
+    }
 
     @Test
     fun parseWithOutcomeMarksLlmSuccessWhenLlmProvidesAllFields() = runBlocking {

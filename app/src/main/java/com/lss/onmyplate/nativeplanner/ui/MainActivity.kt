@@ -22,6 +22,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -30,14 +33,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.lifecycleScope
 import com.lss.onmyplate.nativeplanner.BuildConfig
 import com.lss.onmyplate.nativeplanner.OnMyPlateApp
 import com.lss.onmyplate.nativeplanner.R
+import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.widget.PlannerWidgetSync
 import com.google.android.play.core.appupdate.AppUpdateManager
 import com.google.android.play.core.appupdate.AppUpdateManagerFactory
@@ -45,6 +56,9 @@ import com.google.android.play.core.appupdate.AppUpdateOptions
 import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.UpdateAvailability
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import java.io.IOException
 
 class MainActivity : ComponentActivity() {
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -255,81 +269,80 @@ sealed interface Route {
 private enum class MainTab(val label: String, val route: Route, val imageRes: Int, val badgeText: String? = null) {
     Schedule("일정", Route.Schedule, R.drawable.mascot_note),
     Basket("바구니", Route.Basket, R.drawable.mascot_basket),
+    Sharing("공유", Route.Sharing, R.drawable.mascot_plane),
     Settings("설정", Route.Settings, R.drawable.mascot_settings),
 }
 
 @Composable
 private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val app = context.applicationContext as OnMyPlateApp
-    val activity = context as? MainActivity
-    when (route) {
+    var showQuickAdd by remember { mutableStateOf(false) }
+    val openQuickAdd = { showQuickAdd = true }
+    Box(Modifier.fillMaxSize()) {
+        when (route) {
         Route.Login -> LoginScreen(authRepository = app.authRepository, onAuthenticated = onAuthenticated)
-        Route.Schedule -> MascotScaffold(selected = MainTab.Schedule, onRoute = onRoute) {
+        Route.Schedule -> MascotScaffold(selected = MainTab.Schedule, onRoute = onRoute, onQuickAdd = openQuickAdd) {
             WeeklyScheduleScreen(
                 repository = app.repository,
                 onOpenSchedule = { scheduleId, occurrenceStartAt ->
                     onRoute(Route.ScheduleEdit(scheduleId, occurrenceStartAt, returnRoute = Route.Schedule))
                 },
-                onOpenAvailabilityGroups = { onRoute(Route.AvailabilityGroups) },
             )
         }
-        Route.Basket -> MascotScaffold(selected = MainTab.Basket, onRoute = onRoute) {
+        Route.Basket -> MascotScaffold(selected = MainTab.Basket, onRoute = onRoute, onQuickAdd = openQuickAdd) {
             BasketScreen(
                 repository = app.repository,
-                onCreateCandidate = { rawText, onResult ->
-                    val owner = activity
-                    if (owner == null) {
-                        onResult(Result.failure(IllegalStateException("MainActivity is not available.")))
-                    } else {
-                        owner.lifecycleScope.launch {
-                            runCatching {
-                                app.repository.createCandidate(rawText, "internal", System.currentTimeMillis())
-                            }.fold(
-                                onSuccess = { onResult(Result.success(it)) },
-                                onFailure = { onResult(Result.failure(it)) },
-                            )
-                        }
-                    }
-                },
                 onOpenCandidate = { onRoute(Route.Candidate(it)) },
             )
         }
-        Route.Sharing -> SharingScreen(
-            plannerRepository = app.repository,
-            sharingRepository = app.sharingRepository,
-            onBack = { onRoute(Route.Schedule) },
-        )
-        Route.AvailabilityGroups -> AvailabilityGroupListScreen(
-            repository = app.availabilityGroupRepository,
-            onOpenGroup = { onRoute(Route.AvailabilityGroupDetail(it)) },
-            onCreate = { onRoute(Route.AvailabilityGroupCreate) },
-            onJoin = { onRoute(Route.AvailabilityGroupJoin) },
-            onBack = { onRoute(Route.Schedule) },
-        )
-        Route.AvailabilityGroupCreate -> AvailabilityGroupCreateScreen(
-            repository = app.availabilityGroupRepository,
-            onCreated = { onRoute(Route.AvailabilityGroupDetail(it)) },
-            onBack = { onRoute(Route.AvailabilityGroups) },
-        )
-        Route.AvailabilityGroupJoin -> AvailabilityGroupJoinScreen(
-            repository = app.availabilityGroupRepository,
-            onJoined = { onRoute(Route.AvailabilityGroupDetail(it)) },
-            onBack = { onRoute(Route.AvailabilityGroups) },
-        )
-        is Route.AvailabilityGroupDetail -> AvailabilityGroupDetailScreen(
-            repository = app.availabilityGroupRepository,
-            groupId = route.groupId,
-            onOpenProposal = { proposalId -> onRoute(Route.AvailabilityProposalDetail(route.groupId, proposalId)) },
-            onBack = { onRoute(Route.AvailabilityGroups) },
-        )
-        is Route.AvailabilityProposalDetail -> AvailabilityProposalDetailScreen(
-            repository = app.availabilityGroupRepository,
-            groupId = route.groupId,
-            proposalId = route.proposalId,
-            onBack = { onRoute(Route.AvailabilityGroupDetail(route.groupId)) },
-        )
-        Route.Settings -> MascotScaffold(selected = MainTab.Settings, onRoute = onRoute) {
+        Route.Sharing -> MascotScaffold(selected = MainTab.Sharing, onRoute = onRoute, onQuickAdd = openQuickAdd) {
+            SharingScreen(
+                plannerRepository = app.repository,
+                sharingRepository = app.sharingRepository,
+                onOpenAvailabilityGroups = { onRoute(Route.AvailabilityGroups) },
+            )
+        }
+        Route.AvailabilityGroups -> MascotScaffold(selected = MainTab.Sharing, onRoute = onRoute, onQuickAdd = openQuickAdd) {
+            AvailabilityGroupListScreen(
+                repository = app.availabilityGroupRepository,
+                onOpenGroup = { onRoute(Route.AvailabilityGroupDetail(it)) },
+                onCreate = { onRoute(Route.AvailabilityGroupCreate) },
+                onJoin = { onRoute(Route.AvailabilityGroupJoin) },
+                onBack = { onRoute(Route.Sharing) },
+            )
+        }
+        Route.AvailabilityGroupCreate -> MascotScaffold(selected = MainTab.Sharing, onRoute = onRoute, onQuickAdd = openQuickAdd) {
+            AvailabilityGroupCreateScreen(
+                repository = app.availabilityGroupRepository,
+                onCreated = { onRoute(Route.AvailabilityGroupDetail(it)) },
+                onBack = { onRoute(Route.AvailabilityGroups) },
+            )
+        }
+        Route.AvailabilityGroupJoin -> MascotScaffold(selected = MainTab.Sharing, onRoute = onRoute, onQuickAdd = openQuickAdd) {
+            AvailabilityGroupJoinScreen(
+                repository = app.availabilityGroupRepository,
+                onJoined = { onRoute(Route.AvailabilityGroupDetail(it)) },
+                onBack = { onRoute(Route.AvailabilityGroups) },
+            )
+        }
+        is Route.AvailabilityGroupDetail -> MascotScaffold(selected = MainTab.Sharing, onRoute = onRoute, onQuickAdd = openQuickAdd) {
+            AvailabilityGroupDetailScreen(
+                repository = app.availabilityGroupRepository,
+                groupId = route.groupId,
+                onOpenProposal = { proposalId -> onRoute(Route.AvailabilityProposalDetail(route.groupId, proposalId)) },
+                onBack = { onRoute(Route.AvailabilityGroups) },
+            )
+        }
+        is Route.AvailabilityProposalDetail -> MascotScaffold(selected = MainTab.Sharing, onRoute = onRoute, onQuickAdd = openQuickAdd) {
+            AvailabilityProposalDetailScreen(
+                repository = app.availabilityGroupRepository,
+                groupId = route.groupId,
+                proposalId = route.proposalId,
+                onBack = { onRoute(Route.AvailabilityGroupDetail(route.groupId)) },
+            )
+        }
+        Route.Settings -> MascotScaffold(selected = MainTab.Settings, onRoute = onRoute, onQuickAdd = openQuickAdd) {
             SettingsScreen(
                 authRepository = app.authRepository,
                 feedbackRepository = app.feedbackRepository,
@@ -366,6 +379,13 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () 
             candidateId = route.candidateId,
             onOpenPlanner = { onRoute(Route.Schedule) },
         )
+        }
+        if (showQuickAdd) {
+            QuickAddScheduleDialog(
+                repository = app.repository,
+                onDismiss = { showQuickAdd = false },
+            )
+        }
     }
 }
 
@@ -418,7 +438,12 @@ private fun ComingSoonScreen(title: String, message: String, onBack: () -> Unit)
 }
 
 @Composable
-private fun MascotScaffold(selected: MainTab, onRoute: (Route) -> Unit, content: @Composable BoxScope.() -> Unit) {
+private fun MascotScaffold(
+    selected: MainTab,
+    onRoute: (Route) -> Unit,
+    onQuickAdd: () -> Unit,
+    content: @Composable BoxScope.() -> Unit,
+) {
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f), content = content)
         Row(
@@ -429,47 +454,250 @@ private fun MascotScaffold(selected: MainTab, onRoute: (Route) -> Unit, content:
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            MainTab.entries.forEach { tab ->
-                val isSelected = tab == selected
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(18.dp))
-                        .clickable { onRoute(tab.route) }
-                        .background(if (isSelected) FeedLoopColors.PrimaryLight else Color.Transparent)
-                        .padding(vertical = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Image(
-                            painter = painterResource(tab.imageRes),
-                            contentDescription = tab.label,
-                            modifier = Modifier.size(if (isSelected) 48.dp else 40.dp),
-                        )
-                        tab.badgeText?.let { badgeText ->
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                badgeText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = FeedLoopColors.Pending,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .background(FeedLoopColors.PendingBg, RoundedCornerShape(999.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                            )
-                        }
-                    }
-                    Text(
-                        tab.label,
-                        color = if (isSelected) FeedLoopColors.PrimaryDark else FeedLoopColors.Secondary,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            val tabs = MainTab.entries
+            tabs.take(2).forEach { tab ->
+                MainTabItem(tab = tab, selected = selected, onRoute = onRoute)
+            }
+            Button(
+                onClick = onQuickAdd,
+                modifier = Modifier
+                    .weight(0.8f)
+                    .height(54.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
+                shape = RoundedCornerShape(999.dp),
+                contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+            ) {
+                Text("+", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            }
+            tabs.drop(2).forEach { tab ->
+                MainTabItem(tab = tab, selected = selected, onRoute = onRoute)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.MainTabItem(tab: MainTab, selected: MainTab, onRoute: (Route) -> Unit) {
+    val isSelected = tab == selected
+    Column(
+        Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable { onRoute(tab.route) }
+            .background(if (isSelected) FeedLoopColors.PrimaryLight else Color.Transparent)
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Image(
+                painter = painterResource(tab.imageRes),
+                contentDescription = tab.label,
+                modifier = Modifier.size(if (isSelected) 48.dp else 40.dp),
+            )
+            tab.badgeText?.let { badgeText ->
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    badgeText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = FeedLoopColors.Pending,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .background(FeedLoopColors.PendingBg, RoundedCornerShape(999.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+        }
+        Text(
+            tab.label,
+            color = if (isSelected) FeedLoopColors.PrimaryDark else FeedLoopColors.Secondary,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
+private fun QuickAddScheduleDialog(
+    repository: PlannerRepository,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    var rawInput by remember { mutableStateOf("") }
+    var startAt by remember { mutableStateOf<Long?>(null) }
+    var endAt by remember { mutableStateOf<Long?>(null) }
+    var location by remember { mutableStateOf("") }
+    var reviewMode by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    fun parseInput() {
+        val text = rawInput.trim()
+        if (text.isBlank() || busy) return
+        busy = true
+        message = null
+        scope.launch {
+            runCatching {
+                repository.parseQuickAddInput(text, System.currentTimeMillis())
+            }.onSuccess { outcome ->
+                startAt = outcome.result.startAt
+                endAt = outcome.result.endAt
+                location = outcome.result.location.orEmpty()
+                reviewMode = true
+            }.onFailure { error ->
+                message = quickAddErrorMessage(error)
+            }
+            busy = false
+        }
+    }
+
+    Dialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp),
+            colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface),
+            border = BorderStroke(1.dp, FeedLoopColors.Border),
+            elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+        ) {
+            Column(
+                Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    if (reviewMode) "일정 확인" else "빠른 일정 추가",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (!reviewMode) {
+                    OutlinedTextField(
+                        value = rawInput,
+                        onValueChange = {
+                            rawInput = it
+                            message = null
+                        },
+                        label = { Text("자연어로 일정 입력") },
+                        placeholder = { Text("예: 내일 7시 강남에서 저녁") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester),
+                        singleLine = true,
+                        enabled = !busy,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { parseInput() }),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = FeedLoopColors.PrimaryDark,
+                            unfocusedBorderColor = FeedLoopColors.Border,
+                            focusedLabelColor = FeedLoopColors.PrimaryDark,
+                            cursorColor = FeedLoopColors.PrimaryDark,
+                        ),
                     )
+                    LaunchedEffect(Unit) {
+                        focusRequester.requestFocus()
+                        keyboard?.show()
+                    }
+                } else {
+                    Text(
+                        text = rawInput.trim(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = FeedLoopColors.Secondary,
+                    )
+                    DateAndTimeRangeFields(
+                        startMillis = startAt,
+                        onStartChange = { startAt = it },
+                        endMillis = endAt,
+                        onEndChange = { endAt = it },
+                    )
+                    OutlinedTextField(
+                        value = location,
+                        onValueChange = { location = it },
+                        label = { Text("장소 (선택)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        enabled = !busy,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = FeedLoopColors.PrimaryDark,
+                            unfocusedBorderColor = FeedLoopColors.Border,
+                            focusedLabelColor = FeedLoopColors.PrimaryDark,
+                            cursorColor = FeedLoopColors.PrimaryDark,
+                        ),
+                    )
+                    if (startAt == null) {
+                        Text("시작 시간을 입력하면 확정할 수 있습니다.", color = FeedLoopColors.Warning, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                message?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        enabled = !busy,
+                        modifier = Modifier.weight(0.7f),
+                        border = BorderStroke(1.dp, FeedLoopColors.Border),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                    ) {
+                        Text("취소", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Button(
+                        onClick = {
+                            if (!reviewMode) {
+                                parseInput()
+                            } else {
+                                val confirmedStart = startAt ?: return@Button
+                                busy = true
+                                message = null
+                                scope.launch {
+                                    runCatching {
+                                        repository.createConfirmedScheduleFromQuickAdd(
+                                            rawText = rawInput.trim(),
+                                            startAt = confirmedStart,
+                                            endAt = endAt,
+                                            location = location,
+                                        )
+                                    }.onSuccess {
+                                        Toast.makeText(context, "일정을 추가했습니다.", Toast.LENGTH_SHORT).show()
+                                        onDismiss()
+                                    }.onFailure { error ->
+                                        message = quickAddErrorMessage(error)
+                                        busy = false
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !busy && rawInput.isNotBlank() && (!reviewMode || startAt != null),
+                        modifier = Modifier.weight(1.3f),
+                        colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
+                    ) {
+                        Text(if (reviewMode) "확정" else "확인")
+                    }
                 }
             }
         }
+    }
+}
+
+private fun quickAddErrorMessage(error: Throwable): String {
+    val detail = generateSequence(error) { it.cause }
+        .mapNotNull { it.message?.takeIf(String::isNotBlank) }
+        .firstOrNull()
+    return when {
+        detail == "Login is required." -> "로그인이 필요합니다."
+        detail == "Planner API is not configured." -> "Planner API 주소가 설정되지 않았습니다."
+        error is IOException || error.cause is IOException -> "네트워크 요청에 실패했습니다."
+        detail != null -> detail
+        else -> "일정 처리에 실패했습니다."
     }
 }

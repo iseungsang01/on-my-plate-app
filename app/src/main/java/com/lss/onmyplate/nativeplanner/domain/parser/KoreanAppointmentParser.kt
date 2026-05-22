@@ -17,6 +17,10 @@ class KoreanAppointmentParser(
     private val llmParser: AppointmentLlmParser? = null,
     private val preferLlm: Boolean = false,
 ) {
+    private companion object {
+        const val LOCAL_CONFIDENCE_THRESHOLD = 0.66f
+    }
+
     private val weekdayMap = mapOf(
         "월요일" to DayOfWeek.MONDAY,
         "화요일" to DayOfWeek.TUESDAY,
@@ -47,7 +51,7 @@ class KoreanAppointmentParser(
         if (preferLlm) {
             return parseWithLlm(rawText, receivedAt, local)
         }
-        if (local.startAt != null && local.confidence >= 0.67f) {
+        if (local.startAt != null && local.confidence >= LOCAL_CONFIDENCE_THRESHOLD) {
             return AppointmentParseOutcome(local, AppointmentParseSource.LocalOnly)
         }
         return parseWithLlm(rawText, receivedAt, local)

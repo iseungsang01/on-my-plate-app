@@ -34,7 +34,7 @@ class OnMyPlateApp : Application() {
                     if (error == null) Log.w(TAG, message) else Log.w(TAG, message, error)
                 },
             ),
-            preferLlm = true,
+            preferLlm = false,
         )
     }
     val repository by lazy { PlannerRepository(this, parser) }

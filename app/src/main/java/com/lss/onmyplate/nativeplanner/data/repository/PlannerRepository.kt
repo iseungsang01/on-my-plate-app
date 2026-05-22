@@ -19,6 +19,7 @@ import com.lss.onmyplate.nativeplanner.domain.model.toStoredValue
 import com.lss.onmyplate.nativeplanner.domain.parser.KoreanAppointmentParser
 import com.lss.onmyplate.nativeplanner.widget.PlannerWidgetSync
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +38,7 @@ import java.time.LocalDateTime
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
+import java.util.concurrent.ConcurrentHashMap
 import java.util.UUID
 
 private data class RecentCandidateCreate(
@@ -44,6 +46,11 @@ private data class RecentCandidateCreate(
     val sourceApp: String?,
     val savedAt: Long,
     val candidate: AppointmentCandidateEntity,
+)
+
+private data class ScheduleRangeKey(
+    val rangeStart: Long?,
+    val rangeEnd: Long?,
 )
 
 data class PlannerRuntimeState(
@@ -66,6 +73,13 @@ class PlannerRepository(
     private val scheduleRecords = MutableStateFlow<List<ScheduleRecord>>(emptyList())
     private val pendingCandidates = MutableStateFlow<List<AppointmentCandidateEntity>>(emptyList())
     private val candidateRecords = MutableStateFlow<Map<String, AppointmentCandidateEntity>>(emptyMap())
+    private val scheduleRefreshMutex = Mutex()
+    private val inFlightScheduleRefreshes = mutableMapOf<ScheduleRangeKey, CompletableDeferred<List<ScheduleRecord>>>()
+    private val scheduleFetchTimestamps = ConcurrentHashMap<ScheduleRangeKey, Long>()
+    private val pendingCandidatesRefreshMutex = Mutex()
+    private var inFlightPendingCandidatesRefresh: CompletableDeferred<List<AppointmentCandidateEntity>>? = null
+    @Volatile
+    private var pendingCandidatesFetchedAt: Long = 0L
 
     fun observeSchedules(): Flow<List<ScheduleEntity>> =
         scheduleRecords.map { records -> records.map { it.schedule } }.onStart { runCatching { refreshSchedules() } }
@@ -85,16 +99,20 @@ class PlannerRepository(
     fun observeCandidate(id: String): Flow<AppointmentCandidateEntity?> =
         combine(candidateRecords, pendingCandidates) { records, pending ->
             records[id] ?: pending.firstOrNull { it.id == id }
-        }.onStart { runCatching { refreshCandidate(id) } }
+        }.onStart { runCatching { getCandidate(id) } }
 
-    suspend fun getCandidate(id: String): AppointmentCandidateEntity? =
-        refreshCandidate(id) ?: candidateRecords.value[id] ?: pendingCandidates.value.firstOrNull { it.id == id }
+    suspend fun getCandidate(id: String, forceRefresh: Boolean = false): AppointmentCandidateEntity? {
+        val cached = candidateRecords.value[id] ?: pendingCandidates.value.firstOrNull { it.id == id }
+        if (cached != null && !forceRefresh) return cached
+        return refreshCandidate(id) ?: cached
+    }
 
     fun clearRuntimeError() {
         _runtimeState.value = _runtimeState.value.copy(errorMessage = null)
     }
 
-    suspend fun getSchedules(): List<ScheduleEntity> = refreshSchedules().map { it.schedule }
+    suspend fun getSchedules(forceRefresh: Boolean = false): List<ScheduleEntity> =
+        refreshSchedules(forceRefresh = forceRefresh).map { it.schedule }
 
     suspend fun getSchedule(id: String): ScheduleEntity? = refreshSchedule(id)?.schedule
 
@@ -104,8 +122,8 @@ class PlannerRepository(
     suspend fun getRecurrenceExceptions(scheduleId: String): List<ScheduleRecurrenceExceptionEntity> =
         scheduleRecords.value.firstOrNull { it.schedule.id == scheduleId }?.exceptions ?: refreshSchedule(scheduleId)?.exceptions.orEmpty()
 
-    suspend fun getExpandedSchedules(rangeStart: Long, rangeEnd: Long): List<ScheduleOccurrence> =
-        expandScheduleOccurrences(refreshSchedules(rangeStart, rangeEnd), rangeStart, rangeEnd)
+    suspend fun getExpandedSchedules(rangeStart: Long, rangeEnd: Long, forceRefresh: Boolean = false): List<ScheduleOccurrence> =
+        expandScheduleOccurrences(refreshSchedules(rangeStart, rangeEnd, forceRefresh), rangeStart, rangeEnd)
 
     suspend fun createCandidate(rawText: String, sourceApp: String?, receivedAt: Long): AppointmentCandidateEntity = createCandidateMutex.withLock {
         val cleanRawText = rawText.trim()
@@ -146,49 +164,73 @@ class PlannerRepository(
         }
         Log.i(TAG, "createCandidate API save succeeded. candidateId=${saved.id}, status=${saved.status}")
         rememberCandidate(saved)
-        refreshPendingCandidates()
+        mergePendingCandidate(saved)
+        invalidatePendingCandidatesCache()
         recentCandidateCreate = RecentCandidateCreate(cleanRawText, sourceApp, System.currentTimeMillis(), saved)
         return@withLock saved
     }
 
     suspend fun createScheduleFromInput(rawText: String, sourceApp: String?, receivedAt: Long): ScheduleEntity {
         Log.i(TAG, "createScheduleFromInput started. textLength=${rawText.length}, sourceApp=$sourceApp, apiConfigured=${client.isConfigured()}, hasSession=${hasCachedSession()}")
-        val cleanText = rawText.trim()
-        val startAt = receivedAt
-        val now = System.currentTimeMillis()
-        val schedule = ScheduleEntity(
-            id = UUID.randomUUID().toString(),
-            title = cleanText.lineSequence().firstOrNull()?.take(40)?.ifBlank { null } ?: "새 약속",
+        val parsed = parseQuickAddInput(rawText, receivedAt).result
+        val startAt = parsed.startAt ?: receivedAt
+        return createConfirmedScheduleFromQuickAdd(
+            rawText = rawText,
             startAt = startAt,
-            endAt = startAt + ChronoUnit.HOURS.duration.toMillis(),
-            location = null,
-            memo = null,
-            status = ScheduleStatus.Planned.dbValue,
-            sourceText = cleanText,
-            sourceApp = sourceApp?.takeIf { it.isNotBlank() },
-            createdAt = now,
-            updatedAt = now,
+            endAt = parsed.endAt,
+            location = parsed.location,
+            sourceApp = sourceApp,
+        )
+    }
+
+    suspend fun parseQuickAddInput(rawText: String, receivedAt: Long): AppointmentParseOutcome =
+        runCatching { parser.parseWithOutcome(rawText, receivedAt) }
+            .getOrElse { error ->
+                Log.w(TAG, "parseQuickAddInput parser failed; using parser-error fallback. textLength=${rawText.length}", error)
+                parserErrorOutcome()
+            }
+
+    suspend fun createConfirmedScheduleFromQuickAdd(
+        rawText: String,
+        startAt: Long,
+        endAt: Long?,
+        location: String?,
+        sourceApp: String? = QuickAddSourceApp,
+    ): ScheduleEntity {
+        Log.i(TAG, "createConfirmedScheduleFromQuickAdd started. textLength=${rawText.length}, sourceApp=$sourceApp, apiConfigured=${client.isConfigured()}, hasSession=${hasCachedSession()}")
+        val cleanText = rawText.trim()
+        require(cleanText.isNotBlank()) { "Schedule title is required." }
+        val now = System.currentTimeMillis()
+        val schedule = quickAddScheduleEntity(
+            id = UUID.randomUUID().toString(),
+            rawText = cleanText,
+            startAt = startAt,
+            endAt = endAt,
+            location = location,
+            sourceApp = sourceApp,
+            now = now,
         )
         val savedRecord = try {
             withContext(Dispatchers.IO) {
                 val token = sessionToken()
-                Log.i(TAG, "createScheduleFromInput sending API request. scheduleId=${schedule.id}, titleLength=${schedule.title.length}, tokenLength=${token.length}")
+                Log.i(TAG, "createConfirmedScheduleFromQuickAdd sending API request. scheduleId=${schedule.id}, titleLength=${schedule.title.length}, tokenLength=${token.length}")
                 client.createSchedule(token, schedule, null, emptyList())
             }
         } catch (error: Throwable) {
-            Log.e(TAG, "createScheduleFromInput API save failed. scheduleId=${schedule.id}, titleLength=${schedule.title.length}", error)
+            Log.e(TAG, "createConfirmedScheduleFromQuickAdd API save failed. scheduleId=${schedule.id}, titleLength=${schedule.title.length}", error)
             throw error
         }
-        refreshSchedules()
+        scheduleRecords.value = mergeScheduleRecords(scheduleRecords.value, listOf(savedRecord))
+        invalidateScheduleCache()
         refreshCurrentWeekWidgetSnapshotFromCache()
         return savedRecord.schedule
     }
 
     suspend fun conflictsForCandidate(candidateId: String, titleOverride: String? = null): SaveAttempt {
-        val candidate = getCandidate(candidateId) ?: return SaveAttempt.MissingCandidate
+        val candidate = getCandidate(candidateId, forceRefresh = true) ?: return SaveAttempt.MissingCandidate
         val startAt = candidate.extractedStartAt ?: return SaveAttempt.NeedsUncertain(candidate)
         val endAt = ConflictDetector.newEnd(startAt, candidate.extractedEndAt)
-        val conflicts = getSchedules().filter { ConflictDetector.conflicts(startAt, endAt, it) }
+        val conflicts = getSchedules(forceRefresh = true).filter { ConflictDetector.conflicts(startAt, endAt, it) }
         return if (conflicts.isEmpty()) {
             SaveAttempt.Ready(candidate, titleOverride?.trim()?.takeIf { it.isNotBlank() } ?: candidate.extractedTitle)
         } else {
@@ -204,7 +246,7 @@ class PlannerRepository(
         recurrenceInput: RecurrenceInput = RecurrenceInput.None,
         memoOverride: String? = null,
     ): SaveResult = saveCandidateMutex.withLock {
-        val candidate = getCandidate(candidateId) ?: return@withLock SaveResult.MissingCandidate
+        val candidate = getCandidate(candidateId, forceRefresh = true) ?: return@withLock SaveResult.MissingCandidate
         if (candidate.status != CandidateStatus.Pending.dbValue) return@withLock SaveResult.AlreadyHandled
         val title = candidateScheduleTitle(candidate, selectedStatus, titleOverride) ?: return@withLock SaveResult.TitleRequired
         val shouldPersistTitle = selectedStatus != ScheduleStatus.Uncertain && candidate.extractedTitle != title
@@ -219,7 +261,7 @@ class PlannerRepository(
         val scheduleStatus = if (selectedStatus == ScheduleStatus.Uncertain || startAt == null) ScheduleStatus.Uncertain else selectedStatus
         if (scheduleStatus != ScheduleStatus.Uncertain && startAt != null) {
             val endAt = ConflictDetector.newEnd(startAt, titledCandidate.extractedEndAt)
-            val conflicts = getSchedules().filter { ConflictDetector.conflicts(startAt, endAt, it) }
+            val conflicts = getSchedules(forceRefresh = true).filter { ConflictDetector.conflicts(startAt, endAt, it) }
             if (conflicts.isNotEmpty() && !force) return@withLock SaveResult.Conflict(titledCandidate, conflicts)
         }
 
@@ -235,11 +277,13 @@ class PlannerRepository(
         val savedRecord = withContext(Dispatchers.IO) {
             client.createSchedule(sessionToken(), schedule, recurrenceFor(schedule, recurrenceInput), emptyList())
         }
-        withContext(Dispatchers.IO) { client.updateCandidateStatus(sessionToken(), candidateId, CandidateStatus.Confirmed.dbValue) }
-        rememberCandidate(titledCandidate.copy(status = CandidateStatus.Confirmed.dbValue))
+        val updatedCandidate = withContext(Dispatchers.IO) { client.updateCandidateStatus(sessionToken(), candidateId, CandidateStatus.Confirmed.dbValue) }
+        scheduleRecords.value = mergeScheduleRecords(scheduleRecords.value, listOf(savedRecord))
+        rememberCandidate(updatedCandidate)
+        removePendingCandidate(candidateId)
+        invalidateScheduleCache()
+        invalidatePendingCandidatesCache()
         try {
-            refreshPendingCandidates()
-            refreshSchedules()
             refreshCurrentWeekWidgetSnapshotFromCache()
         } catch (error: Throwable) {
             Log.w(TAG, "saveFromCandidate succeeded but post-save refresh failed. candidateId=$candidateId", error)
@@ -253,7 +297,8 @@ class PlannerRepository(
             client.patchCandidate(sessionToken(), candidateId, title.trim(), startAt, endAt, location?.ifBlank { null })
         }
         rememberCandidate(updated)
-        refreshPendingCandidates()
+        mergePendingCandidate(updated)
+        invalidatePendingCandidatesCache()
     }
 
     suspend fun updateSchedule(
@@ -279,9 +324,9 @@ class PlannerRepository(
         )
         val rule = recurrenceInput?.let { recurrenceFor(updated, it) } ?: getRecurrenceRule(scheduleId)
         val exceptions = getRecurrenceExceptions(scheduleId)
-        withContext(Dispatchers.IO) { client.patchSchedule(sessionToken(), updated, rule, exceptions) }
-        refreshSchedule(scheduleId)
-        refreshSchedules()
+        val savedRecord = withContext(Dispatchers.IO) { client.patchSchedule(sessionToken(), updated, rule, exceptions) }
+        scheduleRecords.value = mergeScheduleRecords(scheduleRecords.value, listOf(savedRecord))
+        invalidateScheduleCache()
         refreshCurrentWeekWidgetSnapshotFromCache()
         return true
     }
@@ -289,15 +334,15 @@ class PlannerRepository(
     suspend fun skipRecurringOccurrence(scheduleId: String, occurrenceStartAt: Long) {
         withContext(Dispatchers.IO) { client.addRecurrenceException(sessionToken(), scheduleId, occurrenceStartAt) }
         refreshSchedule(scheduleId)
-        refreshSchedules()
+        invalidateScheduleCache()
         refreshCurrentWeekWidgetSnapshotFromCache()
     }
 
     suspend fun deleteSchedule(scheduleId: String) {
         withContext(Dispatchers.IO) { client.deleteSchedule(sessionToken(), scheduleId) }
         scheduleRecords.value = scheduleRecords.value.filterNot { it.schedule.id == scheduleId }
+        invalidateScheduleCache()
         try {
-            refreshSchedules()
             refreshCurrentWeekWidgetSnapshotFromCache()
         } catch (error: Throwable) {
             Log.w(TAG, "deleteSchedule succeeded but refreshSchedules failed. scheduleId=$scheduleId", error)
@@ -308,19 +353,44 @@ class PlannerRepository(
         withContext(Dispatchers.IO) { client.discardCandidate(sessionToken(), candidateId) }
         candidateRecords.value = candidateRecords.value + (candidateId to (candidateRecords.value[candidateId]?.copy(status = CandidateStatus.Discarded.dbValue)
             ?: return))
-        refreshPendingCandidates()
+        removePendingCandidate(candidateId)
+        invalidatePendingCandidatesCache()
     }
 
-    suspend fun refreshSchedules(rangeStart: Long? = null, rangeEnd: Long? = null): List<ScheduleRecord> {
+    suspend fun refreshSchedules(rangeStart: Long? = null, rangeEnd: Long? = null, forceRefresh: Boolean = false): List<ScheduleRecord> {
+        val key = ScheduleRangeKey(rangeStart, rangeEnd)
+        val now = System.currentTimeMillis()
+        val (inFlight, ownsFetch) = scheduleRefreshMutex.withLock {
+            val fetchedAt = scheduleFetchTimestamps[key]
+            if (!forceRefresh && fetchedAt != null && now - fetchedAt <= ScheduleCacheTtlMillis) {
+                return recordsForScheduleKey(key)
+            }
+            inFlightScheduleRefreshes[key]?.let { return@withLock it to false }
+            CompletableDeferred<List<ScheduleRecord>>().also { inFlightScheduleRefreshes[key] = it } to true
+        }
+        if (!ownsFetch) return inFlight.await()
         beginRuntimeLoading()
         return try {
             val records = withContext(Dispatchers.IO) { client.listSchedules(sessionToken(), rangeStart, rangeEnd) }
             scheduleRecords.value = mergeScheduleRecords(scheduleRecords.value, records)
+            scheduleRefreshMutex.withLock {
+                scheduleFetchTimestamps[key] = System.currentTimeMillis()
+                inFlight.complete(records)
+            }
             clearRuntimeLoading()
             records
         } catch (error: Throwable) {
+            scheduleRefreshMutex.withLock {
+                inFlight.completeExceptionally(error)
+            }
             recordRuntimeError(error)
             throw error
+        } finally {
+            scheduleRefreshMutex.withLock {
+                if (inFlightScheduleRefreshes[key] === inFlight) {
+                    inFlightScheduleRefreshes.remove(key)
+                }
+            }
         }
     }
 
@@ -337,17 +407,39 @@ class PlannerRepository(
         }
     }
 
-    private suspend fun refreshPendingCandidates(): List<AppointmentCandidateEntity> {
+    private suspend fun refreshPendingCandidates(forceRefresh: Boolean = false): List<AppointmentCandidateEntity> {
+        val now = System.currentTimeMillis()
+        val (inFlight, ownsFetch) = pendingCandidatesRefreshMutex.withLock {
+            if (!forceRefresh && pendingCandidatesFetchedAt > 0 && now - pendingCandidatesFetchedAt <= PendingCandidatesCacheTtlMillis) {
+                return pendingCandidates.value
+            }
+            inFlightPendingCandidatesRefresh?.let { return@withLock it to false }
+            CompletableDeferred<List<AppointmentCandidateEntity>>().also { inFlightPendingCandidatesRefresh = it } to true
+        }
+        if (!ownsFetch) return inFlight.await()
         beginRuntimeLoading()
         return try {
             val candidates = withContext(Dispatchers.IO) { client.listPendingCandidates(sessionToken()) }
             pendingCandidates.value = candidates
             candidateRecords.value = candidateRecords.value + candidates.associateBy { it.id }
+            pendingCandidatesRefreshMutex.withLock {
+                pendingCandidatesFetchedAt = System.currentTimeMillis()
+                inFlight.complete(candidates)
+            }
             clearRuntimeLoading()
             candidates
         } catch (error: Throwable) {
+            pendingCandidatesRefreshMutex.withLock {
+                inFlight.completeExceptionally(error)
+            }
             recordRuntimeError(error)
             throw error
+        } finally {
+            pendingCandidatesRefreshMutex.withLock {
+                if (inFlightPendingCandidatesRefresh === inFlight) {
+                    inFlightPendingCandidatesRefresh = null
+                }
+            }
         }
     }
 
@@ -366,6 +458,38 @@ class PlannerRepository(
 
     private fun rememberCandidate(candidate: AppointmentCandidateEntity) {
         candidateRecords.value = candidateRecords.value + (candidate.id to candidate)
+    }
+
+    private fun mergePendingCandidate(candidate: AppointmentCandidateEntity) {
+        if (candidate.status == CandidateStatus.Pending.dbValue) {
+            pendingCandidates.value = (pendingCandidates.value.filterNot { it.id == candidate.id } + candidate)
+                .sortedByDescending { it.createdAt }
+        } else {
+            removePendingCandidate(candidate.id)
+        }
+    }
+
+    private fun removePendingCandidate(candidateId: String) {
+        pendingCandidates.value = pendingCandidates.value.filterNot { it.id == candidateId }
+    }
+
+    private fun invalidateScheduleCache() {
+        scheduleFetchTimestamps.clear()
+    }
+
+    private fun invalidatePendingCandidatesCache() {
+        pendingCandidatesFetchedAt = 0L
+    }
+
+    private fun recordsForScheduleKey(key: ScheduleRangeKey): List<ScheduleRecord> {
+        val records = scheduleRecords.value
+        val rangeStart = key.rangeStart ?: return records
+        val rangeEnd = key.rangeEnd ?: return records
+        return records.filter { record ->
+            val start = record.schedule.startAt
+            val end = record.schedule.endAt ?: (start + ChronoUnit.HOURS.duration.toMillis())
+            record.recurrence != null || (start < rangeEnd && end > rangeStart)
+        }
     }
 
     private fun refreshCurrentWeekWidgetSnapshotFromCache() {
@@ -552,6 +676,9 @@ class PlannerRepository(
     companion object {
         private const val TAG = "PlannerRepository"
         private const val DuplicateCreateWindowMillis = 2_000L
+        private const val ScheduleCacheTtlMillis = 30_000L
+        private const val PendingCandidatesCacheTtlMillis = 15_000L
+        private const val QuickAddSourceApp = "quick_add"
         private val scheduleZone: ZoneId = ZoneId.of("Asia/Seoul")
         private const val RecurrenceFrequencyDaily = "daily"
         private const val RecurrenceFrequencyWeekly = "weekly"
@@ -630,6 +757,28 @@ internal fun scheduleFromCandidateSave(
     status = scheduleStatus.dbValue,
     sourceText = candidate.rawText,
     sourceApp = candidate.sourceApp,
+    createdAt = now,
+    updatedAt = now,
+)
+
+internal fun quickAddScheduleEntity(
+    id: String,
+    rawText: String,
+    startAt: Long,
+    endAt: Long?,
+    location: String?,
+    sourceApp: String?,
+    now: Long,
+): ScheduleEntity = ScheduleEntity(
+    id = id,
+    title = rawText,
+    startAt = startAt,
+    endAt = endAt ?: startAt + ChronoUnit.HOURS.duration.toMillis(),
+    location = location?.ifBlank { null },
+    memo = null,
+    status = ScheduleStatus.Confirmed.dbValue,
+    sourceText = rawText,
+    sourceApp = sourceApp?.takeIf { it.isNotBlank() },
     createdAt = now,
     updatedAt = now,
 )

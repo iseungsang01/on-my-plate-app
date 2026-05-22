@@ -1,8 +1,6 @@
 package com.lss.onmyplate.nativeplanner.ui
 
 import android.app.DatePickerDialog
-import android.util.Log
-import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,26 +35,19 @@ import androidx.compose.ui.unit.dp
 import com.lss.onmyplate.nativeplanner.data.entity.AppointmentCandidateEntity
 import com.lss.onmyplate.nativeplanner.data.repository.PlannerRepository
 import com.lss.onmyplate.nativeplanner.data.repository.ScheduleOccurrence
-import java.io.IOException
+import kotlinx.coroutines.flow.flowOf
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private val basketZone = ZoneId.of("Asia/Seoul")
 private val basketDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-private const val BasketTag = "BasketScreen"
 
 @Composable
 fun BasketScreen(
     repository: PlannerRepository,
-    onCreateCandidate: (String, (Result<AppointmentCandidateEntity>) -> Unit) -> Unit,
     onOpenCandidate: (String) -> Unit,
 ) {
-    val context = LocalContext.current
-    var directInput by remember { mutableStateOf("") }
-    var isCreatingCandidate by remember { mutableStateOf(false) }
-    var saveScheduleError by remember { mutableStateOf<String?>(null) }
-    var saveScheduleMessage by remember { mutableStateOf<String?>(null) }
     var confirmedExpanded by remember { mutableStateOf(false) }
     var savedFilter by remember { mutableStateOf(SavedScheduleFilter.Week) }
     val today = remember { LocalDate.now(basketZone) }
@@ -68,7 +59,14 @@ fun BasketScreen(
     val pendingCandidates by repository.observePendingCandidates().collectAsState(initial = emptyList())
     
     val runtimeState by repository.runtimeState.collectAsState()
-val savedSchedules by repository.observeExpandedSchedules(savedRange.first, savedRange.second).collectAsState(initial = emptyList())
+    val savedSchedulesFlow = remember(confirmedExpanded, savedRange) {
+        if (confirmedExpanded) {
+            repository.observeExpandedSchedules(savedRange.first, savedRange.second)
+        } else {
+            flowOf(emptyList<ScheduleOccurrence>())
+        }
+    }
+    val savedSchedules by savedSchedulesFlow.collectAsState(initial = emptyList())
 
     Box(
         Modifier
@@ -84,72 +82,6 @@ val savedSchedules by repository.observeExpandedSchedules(savedRange.first, save
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("약속 바구니", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text("공유하거나 입력한 약속을 일정 디테일로 설정한 뒤 확정하면 시간표에 들어갑니다.", style = MaterialTheme.typography.bodySmall, color = FeedLoopColors.Secondary)
-            }
-
-            Card(
-                Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface),
-                border = BorderStroke(1.dp, FeedLoopColors.Border),
-                elevation = CardDefaults.cardElevation(defaultElevation = FeedLoopCardElevation),
-            ) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("일정 디테일 설정 만들기", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    OutlinedTextField(
-                        value = directInput,
-                        onValueChange = {
-                            directInput = it
-                            saveScheduleError = null
-                            saveScheduleMessage = null
-                        },
-                        label = { Text("약속 메시지 붙여넣기 또는 입력") },
-                        placeholder = { Text("예: 다음 주 금요일 저녁 7시 강남에서 민수와 약속") },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 2,
-                        enabled = !isCreatingCandidate,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = FeedLoopColors.Primary,
-                            unfocusedBorderColor = FeedLoopColors.Border,
-                            focusedLabelColor = FeedLoopColors.PrimaryDark,
-                            cursorColor = FeedLoopColors.PrimaryDark,
-                        ),
-                    )
-                    Button(
-                        onClick = {
-                            if (isCreatingCandidate) return@Button
-                            val rawText = directInput.trim()
-                            if (rawText.isBlank()) return@Button
-                            isCreatingCandidate = true
-                            saveScheduleError = null
-                            saveScheduleMessage = null
-                            onCreateCandidate(rawText) { result ->
-                                result.fold(
-                                    onSuccess = { candidate ->
-                                        directInput = ""
-                                        saveScheduleMessage = "일정 디테일 설정을 만들었습니다."
-                                        isCreatingCandidate = false
-                                        onOpenCandidate(candidate.id)
-                                    },
-                                    onFailure = { error ->
-                                        Log.e(BasketTag, "Failed to create appointment detail setup from direct input. textLength=${rawText.length}", error)
-                                        val message = saveScheduleErrorMessage(error)
-                                        saveScheduleError = message
-                                        isCreatingCandidate = false
-                                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                                    },
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = directInput.isNotBlank() && !isCreatingCandidate,
-                        colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
-                    ) { Text(if (isCreatingCandidate) "설정 만드는 중..." else "디테일 설정 열기") }
-                    saveScheduleMessage?.let { message ->
-                        Text(text = message, color = FeedLoopColors.Success, style = MaterialTheme.typography.bodySmall)
-                    }
-                    saveScheduleError?.let { message ->
-                        Text(text = "저장 실패: $message", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
             }
 
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -180,19 +112,6 @@ val savedSchedules by repository.observeExpandedSchedules(savedRange.first, save
                 }
             }
         }
-    }
-}
-
-private fun saveScheduleErrorMessage(error: Throwable): String {
-    val detail = generateSequence(error) { it.cause }
-        .mapNotNull { it.message?.takeIf(String::isNotBlank) }
-        .firstOrNull()
-    return when {
-        detail == "Login is required." -> "로그인이 필요합니다. 설정/로그인 화면에서 다시 로그인해 주세요."
-        detail == "Planner API is not configured." -> "Planner API 주소가 앱에 설정되지 않았습니다."
-        error is IOException || error.cause is IOException -> "네트워크 요청 실패: ${detail ?: error::class.java.simpleName}"
-        detail != null -> detail
-        else -> error::class.java.simpleName
     }
 }
 
