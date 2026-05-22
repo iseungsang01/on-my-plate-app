@@ -158,14 +158,20 @@ class PlannerRepository(
                 client.createCandidate(token, localCandidate)
             }
         } catch (error: Throwable) {
-            Log.e(TAG, "createCandidate API save failed. ${localCandidate.diagnosticSummary()}", error)
+            Log.e(TAG, "createCandidate API save failed; using local candidate fallback for share intake. ${localCandidate.diagnosticSummary()}", error)
             recordRuntimeError(error)
-            throw error
+            localCandidate
         }
-        Log.i(TAG, "createCandidate API save succeeded. candidateId=${saved.id}, status=${saved.status}")
+        if (saved.id == localCandidate.id) {
+            Log.w(TAG, "createCandidate continuing with unsynced local candidate. candidateId=${saved.id}, status=${saved.status}")
+        } else {
+            Log.i(TAG, "createCandidate API save succeeded. candidateId=${saved.id}, status=${saved.status}")
+        }
         rememberCandidate(saved)
         mergePendingCandidate(saved)
-        invalidatePendingCandidatesCache()
+        if (saved.id != localCandidate.id) {
+            invalidatePendingCandidatesCache()
+        }
         recentCandidateCreate = RecentCandidateCreate(cleanRawText, sourceApp, System.currentTimeMillis(), saved)
         return@withLock saved
     }

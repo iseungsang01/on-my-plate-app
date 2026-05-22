@@ -272,6 +272,7 @@
   - The candidate title remains blank until the user enters it in the notification or edit screen.
   - Never writes parser debug markers into `extractedLocation`; fallback/parser-error candidates keep the parsed location when present and otherwise store null.
   - If no time can be parsed, start/end remain null instead of using the received/current time placeholder.
+  - If the remote candidate API save fails after parsing, keeps an unsynced in-memory local candidate so the share notification/edit flow can continue instead of dropping the shared text.
   - Stores blank `sourceApp` as null.
   - Stores candidate status as `pending`.
   - Deduplicates identical `rawText`/`sourceApp` create requests that arrive within the rapid double-submit window by returning the already-created candidate.
