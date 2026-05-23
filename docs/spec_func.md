@@ -447,7 +447,7 @@
 
 - `AppRoot(route, onRoute)`
   - Shows bottom navigation tabs for Schedule, Basket, Sharing, and Settings, with a centered `+` quick-add action between the tab groups.
-  - The centered `+` opens a dimmed quick-add dialog with a focused one-line natural-language input, editable parsed start/end/location review, a primary confirm button, and a smaller cancel button.
+  - The centered `+` opens a dimmed, bottom-anchored quick-add dialog with a focused one-line natural-language input, editable parsed start/end/location review, a primary confirm button, and a smaller cancel button.
   - Displays login, weekly schedule, basket, sharing, group availability subroutes, settings, schedule edit, candidate edit, conflict, and completion screens according to the current route.
   - Quick-add confirm calls `createConfirmedScheduleFromQuickAdd`; it bypasses pending candidates and notifications.
   - `Route.ScheduleEdit` preserves the caller as `returnRoute`; edit back/cancel/save/delete completion returns through that source route.
@@ -597,7 +597,7 @@
   - 선택한 날짜/시간을 epoch milliseconds로 변환해 상위 상태에 전달하며, 선택 값이 없는 선택 항목은 비울 수 있습니다.
 
 - `DateAndTimeRangeFields(startMillis, onStartChange, endMillis, onEndChange, requiredStart)`
-  - 일정/후보 편집에서 시작 날짜를 달력 필드로 분리하고, 시작 시간과 끝 시간은 `HHMM` 숫자 키보드 입력 필드로 받습니다.
+  - 일정/후보 편집에서 시작 날짜를 달력 필드로 분리하고, 시작 시간과 끝 시간은 `HH:mm` 숫자 키보드 입력 필드로 받습니다.
   - 유효한 시간 입력을 선택된 시작 날짜와 결합해 epoch milliseconds로 전달하며, 선택 항목에서는 시작/끝 시간을 함께 지울 수 있습니다.
 
 ### `ui/UiFormat.kt`
@@ -627,10 +627,11 @@
 
 ### `widget/PlannerWidgetSync.kt`
 
-- `syncFromPlannerApiSnapshot(context)`
+- `syncFromPlannerApiSnapshot(context, forceRefresh=false, weekOffset=0)`
   - 앱 context가 `OnMyPlateApp`이 아니면 기존 위젯 snapshot을 지우지 않고 동기화를 중단합니다.
-  - When the context is `OnMyPlateApp` and a login session exists, fetches current-week expanded schedules through `PlannerRepository.getExpandedSchedules`. Repeated background sync attempts inside the throttle window are skipped.
-  - 세션이 없거나 API 조회에 실패하면 빈 snapshot을 저장합니다.
+  - When the context is `OnMyPlateApp` and a login session exists, fetches expanded schedules spanning the current week and the current week plus `weekOffset` through `PlannerRepository.getExpandedSchedules`.
+  - Repeated background sync attempts inside the throttle window are skipped; `forceRefresh=true` bypasses the throttle and repository cache so manual widget refresh reads the database-backed API.
+  - 세션이 없으면 빈 snapshot을 저장하고, API 조회 실패 시에는 마지막으로 유효했던 snapshot을 유지합니다.
   - 조회 결과로 `saveSnapshot`을 호출합니다.
 
 - `saveSnapshot(context, schedules, refreshWidgets=true)`
@@ -663,7 +664,8 @@
 
 - `onReceive(context, intent)`
   - 위젯 클릭 액션을 처리합니다.
-  - planner 열기, 이전 주, 다음 주, viewport 토글을 분기합니다.
+  - planner 열기, 이전 주, 다음 주, viewport 토글, DB 새로고침을 분기합니다.
+  - DB 새로고침은 해당 위젯의 현재 week offset으로 `PlannerWidgetSync.syncFromPlannerApiSnapshot(forceRefresh=true, weekOffset=...)`를 호출합니다.
   - 상태 변경 후 해당 위젯 RemoteViews를 갱신합니다.
 
 - `refreshAll(context)`
@@ -672,7 +674,7 @@
 - `buildRemoteViews(context, manager, appWidgetId)`
   - SharedPreferences snapshot과 위젯별 상태를 읽습니다.
   - 주간 라벨과 timetable bitmap을 설정합니다.
-  - 루트/이전/다음/viewport 토글 클릭 액션을 연결합니다.
+  - 루트/이전/다음/viewport 토글/새로고침 클릭 액션을 연결합니다.
 
 - `bindAction(context, views, appWidgetId, viewId, action)`
   - 특정 view ID에 broadcast PendingIntent를 연결합니다.

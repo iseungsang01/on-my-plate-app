@@ -4,4 +4,7 @@
     <string name="summary_widget_prev_week">&lt;</string>
     <string name="summary_widget_next_week">&gt;</string>
     <string name="summary_widget_toggle_viewport">&#8597;</string>
+    <string name="summary_widget_toggle_viewport_description">Toggle widget time range</string>
+    <string name="summary_widget_refresh">&#8635;</string>
+    <string name="summary_widget_refresh_description">Refresh widget from database</string>
 </resources>

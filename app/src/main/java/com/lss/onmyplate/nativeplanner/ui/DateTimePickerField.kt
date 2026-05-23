@@ -95,16 +95,16 @@ fun DateAndTimeRangeFields(
         mutableStateOf(startDateTime?.toLocalDate() ?: endDateTime?.toLocalDate() ?: LocalDate.now())
     }
     var startTimeText by remember(startMillis) {
-        mutableStateOf(startDateTime?.toLocalTime()?.toTimeDigits().orEmpty())
+        mutableStateOf(startDateTime?.toLocalTime()?.toTimeText().orEmpty())
     }
     var endTimeText by remember(endMillis) {
-        mutableStateOf(endDateTime?.toLocalTime()?.toTimeDigits().orEmpty())
+        mutableStateOf(endDateTime?.toLocalTime()?.toTimeText().orEmpty())
     }
 
     fun applyDate(date: LocalDate) {
         selectedDate = date
-        parseTimeDigitsOrNull(startTimeText)?.let { onStartChange(combineDateAndTime(date, it)) }
-        parseTimeDigitsOrNull(endTimeText)?.let { onEndChange(combineDateAndTime(date, it)) }
+        parseTimeTextOrNull(startTimeText)?.let { onStartChange(combineDateAndTime(date, it)) }
+        parseTimeTextOrNull(endTimeText)?.let { onEndChange(combineDateAndTime(date, it)) }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -118,7 +118,7 @@ fun DateAndTimeRangeFields(
                 value = startTimeText,
                 onValueChange = { next ->
                     startTimeText = next
-                    val parsed = parseTimeDigitsOrNull(next)
+                    val parsed = parseTimeTextOrNull(next)
                     when {
                         parsed != null -> onStartChange(combineDateAndTime(selectedDate, parsed))
                         next.isBlank() -> onStartChange(null)
@@ -132,7 +132,7 @@ fun DateAndTimeRangeFields(
                 value = endTimeText,
                 onValueChange = { next ->
                     endTimeText = next
-                    val parsed = parseTimeDigitsOrNull(next)
+                    val parsed = parseTimeTextOrNull(next)
                     if (parsed != null) {
                         onEndChange(combineDateAndTime(selectedDate, parsed))
                     } else if (next.isBlank()) {
@@ -195,22 +195,20 @@ private fun NumericTimeField(
     required: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val isInvalid = value.isNotBlank() && parseTimeDigitsOrNull(value) == null
+    val isInvalid = value.isNotBlank() && !isPotentialTimeText(value)
     OutlinedTextField(
         value = value,
         onValueChange = { next ->
-            val digits = next.filter(Char::isDigit).take(4)
-            onValueChange(digits)
+            onValueChange(next.toEditableTimeText())
         },
         label = { Text(label) },
         modifier = modifier,
         singleLine = true,
-        placeholder = { Text("0900") },
-        suffix = { Text("HHMM") },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        placeholder = { Text("09:00") },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
         isError = isInvalid || (required && value.isBlank()),
         supportingText = {
-            if (isInvalid) Text("0000~2359")
+            if (isInvalid) Text("00:00~23:59")
         },
         colors = pickerFieldColors(),
     )
@@ -225,16 +223,62 @@ private fun pickerFieldColors() = OutlinedTextFieldDefaults.colors(
     errorBorderColor = FeedLoopColors.Error,
 )
 
-internal fun parseTimeDigitsOrNull(value: String): LocalTime? {
-    val digits = value.filter(Char::isDigit)
-    if (digits.length !in 3..4) return null
-    val hourText = digits.dropLast(2)
-    val minuteText = digits.takeLast(2)
+internal fun parseTimeTextOrNull(value: String): LocalTime? {
+    val trimmed = value.trim()
+    if (trimmed.contains(':')) {
+        val parts = trimmed.split(':')
+        if (parts.size != 2) return null
+        val hourText = parts[0]
+        val minuteText = parts[1]
+        if (hourText.length !in 1..2 || minuteText.length != 2) return null
+        return parseHourMinuteOrNull(hourText, minuteText)
+    }
+
+    val digits = trimmed.filter(Char::isDigit)
+    if (digits.length != 4 || digits.length != trimmed.length) return null
+    return parseHourMinuteOrNull(digits.take(2), digits.takeLast(2))
+}
+
+private fun isPotentialTimeText(value: String): Boolean {
+    val trimmed = value.trim()
+    if (trimmed.isEmpty()) return true
+    if (trimmed.count { it == ':' } > 1) return false
+    if (trimmed.any { !it.isDigit() && it != ':' }) return false
+
+    if (!trimmed.contains(':')) {
+        if (trimmed.length > 4) return false
+        if (trimmed.length < 4) return true
+        return parseTimeTextOrNull(trimmed) != null
+    }
+
+    val parts = trimmed.split(':')
+    if (parts.size != 2) return false
+    val hourText = parts[0]
+    val minuteText = parts[1]
+    if (hourText.isEmpty() || hourText.length > 2 || minuteText.length > 2) return false
+    val hour = hourText.toIntOrNull() ?: return false
+    if (hour !in 0..23) return false
+    if (minuteText.length < 2) return true
+    val minute = minuteText.toIntOrNull() ?: return false
+    return minute in 0..59
+}
+
+private fun parseHourMinuteOrNull(hourText: String, minuteText: String): LocalTime? {
     val hour = hourText.toIntOrNull() ?: return null
     val minute = minuteText.toIntOrNull() ?: return null
     if (hour !in 0..23 || minute !in 0..59) return null
     return LocalTime.of(hour, minute)
 }
 
-private fun LocalTime.toTimeDigits(): String =
-    hour.toString().padStart(2, '0') + minute.toString().padStart(2, '0')
+private fun String.toEditableTimeText(): String {
+    val filtered = filter { it.isDigit() || it == ':' }
+    val colonIndex = filtered.indexOf(':')
+    if (colonIndex < 0) return filtered.filter(Char::isDigit).take(4)
+
+    val hour = filtered.take(colonIndex).filter(Char::isDigit).take(2)
+    val minute = filtered.drop(colonIndex + 1).filter(Char::isDigit).take(2)
+    return "$hour:$minute"
+}
+
+private fun LocalTime.toTimeText(): String =
+    hour.toString().padStart(2, '0') + ":" + minute.toString().padStart(2, '0')

@@ -37,6 +37,7 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
     private static final String ACTION_PREVIOUS_WEEK = "com.lss.onmyplate.nativeplanner.action.WIDGET_PREVIOUS_WEEK";
     private static final String ACTION_NEXT_WEEK = "com.lss.onmyplate.nativeplanner.action.WIDGET_NEXT_WEEK";
     private static final String ACTION_TOGGLE_VIEWPORT = "com.lss.onmyplate.nativeplanner.action.WIDGET_TOGGLE_VIEWPORT";
+    private static final String ACTION_REFRESH = "com.lss.onmyplate.nativeplanner.action.WIDGET_REFRESH";
 
     private static final int DEFAULT_WIDTH_DP = 320;
     private static final int DEFAULT_HEIGHT_DP = 220;
@@ -95,6 +96,9 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
             SharedPreferences prefs = PlannerWidgetStore.getPrefs(context);
             boolean isShrunk = prefs.getBoolean(getViewportShrunkKey(appWidgetId), false);
             prefs.edit().putBoolean(getViewportShrunkKey(appWidgetId), !isShrunk).apply();
+        } else if (ACTION_REFRESH.equals(action)) {
+            int weekOffset = PlannerWidgetStore.getPrefs(context).getInt(getWeekOffsetKey(appWidgetId), 0);
+            PlannerWidgetSync.INSTANCE.syncFromPlannerApiSnapshot(context, true, weekOffset);
         } else {
             return;
         }
@@ -125,6 +129,7 @@ public class SummaryWidgetProvider extends AppWidgetProvider {
         bindAction(context, views, appWidgetId, R.id.widget_week_prev, ACTION_PREVIOUS_WEEK);
         bindAction(context, views, appWidgetId, R.id.widget_week_next, ACTION_NEXT_WEEK);
         bindAction(context, views, appWidgetId, R.id.widget_viewport_toggle, ACTION_TOGGLE_VIEWPORT);
+        bindAction(context, views, appWidgetId, R.id.widget_refresh, ACTION_REFRESH);
 
         return views;
     }

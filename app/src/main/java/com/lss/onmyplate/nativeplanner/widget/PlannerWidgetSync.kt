@@ -21,10 +21,11 @@ object PlannerWidgetSync {
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var lastSyncStartedAt: Long = 0L
 
-    fun syncFromPlannerApiSnapshot(context: Context) {
+    @JvmOverloads
+    fun syncFromPlannerApiSnapshot(context: Context, forceRefresh: Boolean = false, weekOffset: Int = 0) {
         val appContext = context.applicationContext
         val now = System.currentTimeMillis()
-        if (now - lastSyncStartedAt < SyncThrottleMillis) {
+        if (!forceRefresh && now - lastSyncStartedAt < SyncThrottleMillis) {
             return
         }
         lastSyncStartedAt = now
@@ -38,10 +39,16 @@ object PlannerWidgetSync {
                 return@launch
             }
             runCatching {
-                val monday = currentWeekStart()
-                val rangeStart = monday.atStartOfDay(zoneId).toInstant().toEpochMilli()
-                val rangeEnd = monday.plusDays(7).atStartOfDay(zoneId).toInstant().toEpochMilli()
-                saveSnapshot(appContext, app.repository.getExpandedSchedules(rangeStart, rangeEnd))
+                val currentMonday = currentWeekStart()
+                val targetMonday = currentMonday.plusWeeks(weekOffset.toLong())
+                val rangeStartDate = if (targetMonday.isBefore(currentMonday)) targetMonday else currentMonday
+                val rangeEndDate = if (targetMonday.isAfter(currentMonday)) targetMonday.plusDays(7) else currentMonday.plusDays(7)
+                val rangeStart = rangeStartDate.atStartOfDay(zoneId).toInstant().toEpochMilli()
+                val rangeEnd = rangeEndDate.atStartOfDay(zoneId).toInstant().toEpochMilli()
+                saveSnapshot(
+                    appContext,
+                    app.repository.getExpandedSchedules(rangeStart, rangeEnd, forceRefresh = forceRefresh),
+                )
             }.onFailure {
                 // Keep the last valid snapshot on transient API/network failure.
             }

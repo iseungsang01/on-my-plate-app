@@ -7,17 +7,23 @@ import org.junit.Test
 
 class DateAndTimeRangeFieldsTest {
     @Test
-    fun parsesNumericTimeInputAsHourMinute() {
-        assertEquals(LocalTime.of(9, 0), parseTimeDigitsOrNull("0900"))
-        assertEquals(LocalTime.of(18, 30), parseTimeDigitsOrNull("1830"))
-        assertEquals(LocalTime.of(9, 5), parseTimeDigitsOrNull("905"))
+    fun parsesTimeInputAsHourMinute() {
+        assertEquals(LocalTime.of(9, 0), parseTimeTextOrNull("09:00"))
+        assertEquals(LocalTime.of(18, 30), parseTimeTextOrNull("18:30"))
+        assertEquals(LocalTime.of(9, 5), parseTimeTextOrNull("9:05"))
+        assertEquals(LocalTime.of(12, 15), parseTimeTextOrNull("1215"))
+    }
+
+    @Test
+    fun doesNotParsePartialCompactInput() {
+        assertNull(parseTimeTextOrNull("121"))
     }
 
     @Test
     fun rejectsOutOfRangeNumericTimeInput() {
-        assertNull(parseTimeDigitsOrNull(""))
-        assertNull(parseTimeDigitsOrNull("24"))
-        assertNull(parseTimeDigitsOrNull("2460"))
-        assertNull(parseTimeDigitsOrNull("1260"))
+        assertNull(parseTimeTextOrNull(""))
+        assertNull(parseTimeTextOrNull("24"))
+        assertNull(parseTimeTextOrNull("2460"))
+        assertNull(parseTimeTextOrNull("1260"))
     }
 }

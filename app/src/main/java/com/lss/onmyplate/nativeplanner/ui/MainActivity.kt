@@ -560,18 +560,22 @@ private fun QuickAddScheduleDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Card(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp),
-            colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface),
-            border = BorderStroke(1.dp, FeedLoopColors.Border),
-            elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+                .fillMaxSize()
+                .padding(start = 18.dp, end = 18.dp, bottom = 24.dp),
+            contentAlignment = Alignment.BottomCenter,
         ) {
-            Column(
-                Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = FeedLoopColors.Surface),
+                border = BorderStroke(1.dp, FeedLoopColors.Border),
+                elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
             ) {
+                Column(
+                    Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                 Text(
                     if (reviewMode) "일정 확인" else "빠른 일정 추가",
                     style = MaterialTheme.typography.titleMedium,
@@ -687,6 +691,7 @@ private fun QuickAddScheduleDialog(
             }
         }
     }
+}
 }
 
 private fun quickAddErrorMessage(error: Throwable): String {
