@@ -2,7 +2,6 @@ package com.lss.onmyplate.nativeplanner.domain.model
 
 enum class ScheduleStatus(val dbValue: String) {
     Confirmed("confirmed"),
-    Planned("planned"),
     Uncertain("uncertain");
 }
 

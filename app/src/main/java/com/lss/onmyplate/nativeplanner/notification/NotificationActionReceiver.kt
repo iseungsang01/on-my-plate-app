@@ -54,7 +54,6 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val input = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REMOTE_TITLE)?.toString()
         val status = when (intent.getStringExtra(EXTRA_STATUS)) {
             ScheduleStatus.Confirmed.dbValue -> ScheduleStatus.Confirmed
-            ScheduleStatus.Planned.dbValue -> ScheduleStatus.Planned
             else -> ScheduleStatus.Uncertain
         }
         val title = input.takeIf { status != ScheduleStatus.Uncertain }

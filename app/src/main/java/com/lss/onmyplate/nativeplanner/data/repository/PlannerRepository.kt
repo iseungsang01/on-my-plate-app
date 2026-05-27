@@ -182,6 +182,7 @@ class PlannerRepository(
         val startAt = parsed.startAt ?: receivedAt
         return createConfirmedScheduleFromQuickAdd(
             rawText = rawText,
+            title = parsed.title.takeIf { it.isNotBlank() } ?: rawText,
             startAt = startAt,
             endAt = parsed.endAt,
             location = parsed.location,
@@ -198,6 +199,7 @@ class PlannerRepository(
 
     suspend fun createConfirmedScheduleFromQuickAdd(
         rawText: String,
+        title: String,
         startAt: Long,
         endAt: Long?,
         location: String?,
@@ -205,11 +207,14 @@ class PlannerRepository(
     ): ScheduleEntity {
         Log.i(TAG, "createConfirmedScheduleFromQuickAdd started. textLength=${rawText.length}, sourceApp=$sourceApp, apiConfigured=${client.isConfigured()}, hasSession=${hasCachedSession()}")
         val cleanText = rawText.trim()
-        require(cleanText.isNotBlank()) { "Schedule title is required." }
+        val cleanTitle = title.trim()
+        require(cleanText.isNotBlank()) { "Schedule source text is required." }
+        require(cleanTitle.isNotBlank()) { "Schedule title is required." }
         val now = System.currentTimeMillis()
         val schedule = quickAddScheduleEntity(
             id = UUID.randomUUID().toString(),
             rawText = cleanText,
+            title = cleanTitle,
             startAt = startAt,
             endAt = endAt,
             location = location,
@@ -770,6 +775,7 @@ internal fun scheduleFromCandidateSave(
 internal fun quickAddScheduleEntity(
     id: String,
     rawText: String,
+    title: String,
     startAt: Long,
     endAt: Long?,
     location: String?,
@@ -777,7 +783,7 @@ internal fun quickAddScheduleEntity(
     now: Long,
 ): ScheduleEntity = ScheduleEntity(
     id = id,
-    title = rawText,
+    title = title,
     startAt = startAt,
     endAt = endAt ?: startAt + ChronoUnit.HOURS.duration.toMillis(),
     location = location?.ifBlank { null },
@@ -966,7 +972,7 @@ private class PlannerApiClient(
             endAt = optNullableString("endAt", "end_at")?.let { parseInstantMillis(it) },
             location = optNullableString("location"),
             memo = optNullableString("memo"),
-            status = optString("status", ScheduleStatus.Planned.dbValue),
+            status = optString("status", ScheduleStatus.Uncertain.dbValue),
             sourceText = optNullableString("sourceText", "source_text"),
             sourceApp = optNullableString("sourceApp", "source_app"),
             createdAt = optNullableString("createdAt", "created_at")?.let { parseInstantMillis(it) } ?: 0L,

@@ -202,8 +202,7 @@ private fun PlannerTextField(value: String, onValueChange: (String) -> Unit, lab
 
 fun scheduleStatusFromDb(value: String?): ScheduleStatus = when (value) {
     ScheduleStatus.Confirmed.dbValue -> ScheduleStatus.Confirmed
-    ScheduleStatus.Uncertain.dbValue -> ScheduleStatus.Uncertain
-    else -> ScheduleStatus.Planned
+    else -> ScheduleStatus.Uncertain
 }
 
 fun statusDbLabel(value: String): String = statusLabel(scheduleStatusFromDb(value))

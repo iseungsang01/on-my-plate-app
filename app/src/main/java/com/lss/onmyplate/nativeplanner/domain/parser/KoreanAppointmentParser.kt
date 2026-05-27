@@ -77,6 +77,7 @@ class KoreanAppointmentParser(
         val date = parseDate(rawText, baseDate)
         val timeParse = parseTime(rawText)
         val location = parseLocation(rawText)
+        val title = parseTitle(rawText)
         val startAt = if (date != null && timeParse.time != null) {
             LocalDateTime.of(date, timeParse.time).atZone(zoneId).toInstant().toEpochMilli()
         } else {
@@ -90,7 +91,7 @@ class KoreanAppointmentParser(
         }
         val confidence = listOfNotNull(date, timeParse.time, location).size / 3f
         return AppointmentParseResult(
-            title = "",
+            title = title,
             startAt = startAt,
             endAt = endAt,
             location = location,
@@ -246,6 +247,20 @@ class KoreanAppointmentParser(
         return hourWords.fold(text) { current, (word, value) ->
             current.replace(Regex("${Regex.escape(word)}\\s*시"), "${value}시")
         }
+    }
+
+
+
+    private fun parseTitle(text: String): String {
+        val trimmed = text.trim()
+        if (trimmed.startsWith("fallback", ignoreCase = true)) return ""
+        val withoutStructuredTokens = normalizeKoreanHourNumbers(trimmed)
+            .replace(Regex("\\b\\d{1,2}/\\d{1,2}\\b"), " ")
+            .replace(Regex("\\b\\d{1,2}:?\\d{2}\\s*[-~]\\s*\\d{1,2}:?\\d{2}\\b"), " ")
+            .replace(Regex("\\b\\d{1,2}:\\d{2}\\b"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        return withoutStructuredTokens.takeIf { it.isNotBlank() }?.take(80).orEmpty()
     }
 
     private fun parseLocation(text: String): String? {

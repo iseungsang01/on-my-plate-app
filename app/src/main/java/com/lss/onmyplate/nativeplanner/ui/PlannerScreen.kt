@@ -47,6 +47,7 @@ private val basketDateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 fun BasketScreen(
     repository: PlannerRepository,
     onOpenCandidate: (String) -> Unit,
+    onOpenSchedule: (String, Long?) -> Unit,
 ) {
     var confirmedExpanded by remember { mutableStateOf(false) }
     var savedFilter by remember { mutableStateOf(SavedScheduleFilter.Week) }
@@ -67,6 +68,9 @@ fun BasketScreen(
         }
     }
     val savedSchedules by savedSchedulesFlow.collectAsState(initial = emptyList())
+    val uncertainSchedules = remember(savedSchedules) {
+        savedSchedules.filter { scheduleStatusFromDb(it.schedule.status) == com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus.Uncertain }
+    }
 
     Box(
         Modifier
@@ -107,7 +111,8 @@ fun BasketScreen(
                             customEndDate = it
                             if (customStartDate.isAfter(it)) customStartDate = it
                         },
-                        schedules = savedSchedules,
+                        schedules = uncertainSchedules,
+                        onOpenSchedule = onOpenSchedule,
                     )
                 }
             }
@@ -191,6 +196,7 @@ private fun SavedScheduleSection(
     customEndDate: LocalDate,
     onCustomEndDate: (LocalDate) -> Unit,
     schedules: List<ScheduleOccurrence>,
+    onOpenSchedule: (String, Long?) -> Unit,
 ) {
     Card(
         Modifier.fillMaxWidth(),
@@ -225,7 +231,7 @@ private fun SavedScheduleSection(
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         schedules.sortedBy { it.occurrenceStartAt }.forEach { occurrence ->
-                            SavedScheduleRow(occurrence)
+                            SavedScheduleRow(occurrence, onOpen = { onOpenSchedule(occurrence.scheduleId, occurrence.occurrenceStartAt) })
                         }
                     }
                 }
@@ -276,13 +282,14 @@ private fun DateOnlyField(label: String, date: LocalDate, onDateChange: (LocalDa
 }
 
 @Composable
-private fun SavedScheduleRow(occurrence: ScheduleOccurrence) {
+private fun SavedScheduleRow(occurrence: ScheduleOccurrence, onOpen: () -> Unit) {
     val schedule = occurrence.schedule
     Column(
         Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
             .background(FeedLoopColors.Tertiary.copy(alpha = 0.55f))
+            .clickable(onClick = onOpen)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

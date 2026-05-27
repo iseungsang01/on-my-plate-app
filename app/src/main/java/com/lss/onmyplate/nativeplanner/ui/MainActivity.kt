@@ -294,6 +294,9 @@ private fun AppRoot(route: Route, onRoute: (Route) -> Unit, onAuthenticated: () 
             BasketScreen(
                 repository = app.repository,
                 onOpenCandidate = { onRoute(Route.Candidate(it)) },
+                onOpenSchedule = { scheduleId, occurrenceStartAt ->
+                    onRoute(Route.ScheduleEdit(scheduleId, occurrenceStartAt, returnRoute = Route.Basket))
+                },
             )
         }
         Route.Sharing -> MascotScaffold(selected = MainTab.Sharing, onRoute = onRoute, onQuickAdd = openQuickAdd) {
@@ -529,6 +532,7 @@ private fun QuickAddScheduleDialog(
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     var rawInput by remember { mutableStateOf("") }
+    var title by remember { mutableStateOf("") }
     var startAt by remember { mutableStateOf<Long?>(null) }
     var endAt by remember { mutableStateOf<Long?>(null) }
     var location by remember { mutableStateOf("") }
@@ -545,6 +549,7 @@ private fun QuickAddScheduleDialog(
             runCatching {
                 repository.parseQuickAddInput(text, System.currentTimeMillis())
             }.onSuccess { outcome ->
+                title = outcome.result.title.takeIf { it.isNotBlank() } ?: text
                 startAt = outcome.result.startAt
                 endAt = outcome.result.endAt
                 location = outcome.result.location.orEmpty()
@@ -614,6 +619,20 @@ private fun QuickAddScheduleDialog(
                         style = MaterialTheme.typography.bodyMedium,
                         color = FeedLoopColors.Secondary,
                     )
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        label = { Text("??") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        enabled = !busy,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = FeedLoopColors.PrimaryDark,
+                            unfocusedBorderColor = FeedLoopColors.Border,
+                            focusedLabelColor = FeedLoopColors.PrimaryDark,
+                            cursorColor = FeedLoopColors.PrimaryDark,
+                        ),
+                    )
                     DateAndTimeRangeFields(
                         startMillis = startAt,
                         onStartChange = { startAt = it },
@@ -667,6 +686,7 @@ private fun QuickAddScheduleDialog(
                                     runCatching {
                                         repository.createConfirmedScheduleFromQuickAdd(
                                             rawText = rawInput.trim(),
+                                            title = title,
                                             startAt = confirmedStart,
                                             endAt = endAt,
                                             location = location,
@@ -681,7 +701,7 @@ private fun QuickAddScheduleDialog(
                                 }
                             }
                         },
-                        enabled = !busy && rawInput.isNotBlank() && (!reviewMode || startAt != null),
+                        enabled = !busy && rawInput.isNotBlank() && (!reviewMode || (startAt != null && title.isNotBlank())),
                         modifier = Modifier.weight(1.3f),
                         colors = ButtonDefaults.buttonColors(containerColor = FeedLoopColors.PrimaryDark),
                     ) {

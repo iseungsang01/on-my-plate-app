@@ -56,6 +56,16 @@ class KoreanAppointmentParserTest {
         assertEquals(TimeConfidence.High, result.timeConfidence)
     }
 
+
+    @Test
+    fun parsesSlashDateCompactTimeRangeAndTrailingTitle() = runBlocking {
+        val result = parser.parse("5/29 1000-1400 ???", receivedAt)
+
+        assertEquals(epochMillis(2026, 5, 29, 10, 0), result.startAt)
+        assertEquals(epochMillis(2026, 5, 29, 14, 0), result.endAt)
+        assertEquals("???", result.title)
+    }
+
     @Test
     fun parsesSlashDateColonRangeWithoutFallbackMarker() = runBlocking {
         val result = parser.parse("5/17 14:00-16:00 강남", receivedAt)

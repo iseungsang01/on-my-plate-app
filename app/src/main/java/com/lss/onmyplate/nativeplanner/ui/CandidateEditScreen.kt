@@ -266,8 +266,7 @@ private fun parseSourceLabel(parseSource: String): String = when (parseSource) {
 
 fun statusLabel(status: ScheduleStatus): String = when (status) {
     ScheduleStatus.Confirmed -> "확정"
-    ScheduleStatus.Planned -> "예정"
-    ScheduleStatus.Uncertain -> "보류"
+    ScheduleStatus.Uncertain -> "미정"
 }
 
 private val ColdAccent = Color(0xFF2563EB)

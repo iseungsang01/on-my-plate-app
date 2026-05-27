@@ -60,8 +60,11 @@ fun WeeklyScheduleScreen(
     }
     val schedules by expandedSchedulesFlow.collectAsState(initial = emptyList())
     val runtimeState by repository.runtimeState.collectAsState()
-    val schedulesByDay = remember(schedules, days) {
-        days.associateWith { day -> schedules.filter { it.localDate() == day } }
+    val confirmedSchedules = remember(schedules) {
+        schedules.filter { scheduleStatusFromDb(it.schedule.status) == com.lss.onmyplate.nativeplanner.domain.model.ScheduleStatus.Confirmed }
+    }
+    val schedulesByDay = remember(confirmedSchedules, days) {
+        days.associateWith { day -> confirmedSchedules.filter { it.localDate() == day } }
     }
 
     Box(
